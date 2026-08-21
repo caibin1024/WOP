@@ -1,0 +1,283 @@
+/* ============================================
+   WOP 设计系统 — OLED 深色 + 能量橙
+   基于 ui-ux-pro-max 设计规范
+   间距：4/8dp 系统  |  圆角：16px
+   触控目标：≥44px  |  对比度：AA
+   ============================================ */
+
+:root {
+  /* 背景（午夜蓝渐变，避免纯黑 OLED 拖影） */
+  --bg-deep: #05060A;
+  --bg-base: #0A0E27;
+  --bg-elevated: #12152B;
+
+  /* 卡片：半透明玻璃层 */
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-hover: rgba(255, 255, 255, 0.07);
+  --surface-active: rgba(255, 255, 255, 0.1);
+
+  /* 边框：细线半透 */
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* 文字 */
+  --text-primary: #EDEDEF;
+  --text-secondary: #9BA1A9;
+  --text-tertiary: #6B7280;
+
+  /* 品牌色：能量橙 + 成功绿 */
+  --accent: #F97316;
+  --accent-strong: #FB923C;
+  --accent-glow: rgba(249, 115, 22, 0.18);
+  --accent-dim: rgba(249, 115, 22, 0.12);
+  --on-accent: #1A0A02;
+
+  --success: #22C55E;
+  --success-dim: rgba(34, 197, 94, 0.12);
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --danger-dim: rgba(239, 68, 68, 0.12);
+
+  /* 形状与效果 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --glow-shadow: 0 0 20px var(--accent-glow);
+
+  /* 间距刻度 (4/8dp) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* 注意：小米 WebView 不通过 CSS env(safe-area-inset-*) 上报安全区（返回 0）。
+     由原生 MainActivity 读取真实 insets 注入 --safe-top-real / --safe-bottom-real，
+     CSS 一律用 var(--safe-*-real, env(safe-area-inset-*)) 兜底（桌面/异常=env 值）。 */
+  --easing: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  overscroll-behavior-y: none;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--bg-base);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(249, 115, 22, 0.06), transparent),
+    linear-gradient(180deg, var(--bg-base), var(--bg-deep));
+  color: var(--text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  font-size: 16px;
+}
+
+#app {
+  height: 100%;
+}
+
+/* ---------- 通用卡片：玻璃层 ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-3);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  letter-spacing: 0.2px;
+}
+
+/* ---------- 通用按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 46px;
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s var(--easing), transform 0.1s, opacity 0.2s;
+  background: var(--surface);
+  color: var(--text-primary);
+  touch-action: manipulation;
+}
+
+.btn:active {
+  transform: scale(0.97);
+  background: var(--surface-active);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+  box-shadow: 0 4px 20px var(--accent-glow);
+}
+
+.btn-primary:active {
+  background: var(--accent-strong);
+}
+
+.btn-success {
+  background: var(--success-dim);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: var(--success);
+}
+
+.btn-danger {
+  background: var(--danger-dim);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--danger);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ---------- 页面头部（sticky 冻结：滚动时标题固定，内容从下方穿过） ---------- */
+.page-header {
+  position: sticky;
+  top: 0;
+  z-index: 40; /* 低于 bottom-nav(100) 与底部面板(900) */
+  /* 顶部安全区并入标题块，整块从屏幕顶端 y=0 盖下来（不孤立的一道杠） */
+  padding: calc(var(--sp-4) + var(--safe-top-real, env(safe-area-inset-top))) var(--sp-4) var(--sp-4);
+  /* 不透明背景：复用 body 的背景栈，静止时与页面无缝融合，滚动时遮住下方内容 */
+  background-color: var(--bg-base);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(249, 115, 22, 0.06), transparent),
+    linear-gradient(180deg, var(--bg-base), var(--bg-deep));
+}
+
+.page-header h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+}
+
+.page-header .subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: var(--sp-1);
+}
+
+.page-padding {
+  padding: 0 var(--sp-4);
+}
+
+/* ---------- 空状态 ---------- */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-secondary);
+}
+
+.empty-state .empty-icon {
+  font-size: 44px;
+  margin-bottom: var(--sp-3);
+  opacity: 0.7;
+}
+
+/* ---------- 状态徽标 ---------- */
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.badge-orange {
+  background: var(--accent-dim);
+  color: var(--accent-strong);
+}
+
+.badge-green {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
+.tag {
+  background: var(--surface-hover);
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+/* ---------- 输入框 ---------- */
+.set-input, .form-input {
+  min-height: 46px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 15px;
+  min-width: 0;
+  transition: border-color 0.2s var(--easing), box-shadow 0.2s var(--easing);
+  outline: none;
+}
+
+.set-input:focus, .form-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.set-input::placeholder, .form-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* ---------- 数字等宽（计时器/数据） ---------- */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 无障碍：键盘焦点 ---------- */
+.btn:focus-visible, .nav-item:focus-visible, .filter-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- 尊重减少动画 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

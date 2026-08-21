@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 基底：午夜蓝渐变 -->
+    <path
+        android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="0"
+                android:endY="108"
+                android:type="linear">
+                <item android:offset="0" android:color="#12152B"/>
+                <item android:offset="1" android:color="#05060A"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 能量橙辉光 -->
+    <path
+        android:pathData="M54,44m-60,0a60,60 0 1,1 120,0a60,60 0 1,1 -120,0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="54"
+                android:centerY="44"
+                android:gradientRadius="60"
+                android:type="radial">
+                <item android:offset="0" android:color="#33F97316"/>
+                <item android:offset="1" android:color="#00F97316"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

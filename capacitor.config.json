@@ -1,0 +1,12 @@
+{
+  "appId": "com.xdw.fitness",
+  "appName": "WOP",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#0f172a",
+    "allowMixedContent": true
+  }
+}
