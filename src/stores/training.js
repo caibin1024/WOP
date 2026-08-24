@@ -13,8 +13,9 @@ import {
  */
 export const useTrainingStore = defineStore('training', () => {
   const todayDayType = ref(seedGetTodayDayType(1)) // 默认偏移 1：今天为休息日，避免首帧闪 Push
-  const scheduleOffset = ref(1)                     // 练三休一计划已顺延的天数
-  const scheduleLoaded = ref(false)                 // 是否已从 DB 读取偏移
+  const baselineOffset = ref(1)                    // 练三休一计划基线偏移（迁移自 schedule_offset_days，顺延不再改它）
+  const scheduleChanges = ref([])                  // 顺延时间线：[{ date, offset }]，从 date 起有效偏移变为 offset
+  const scheduleLoaded = ref(false)                // 是否已从 DB 读取偏移
   const missStartDate = ref(todayStr())             // 漏练判断起始日（安装后开始，可调整）
   const todayExercises = ref([])        // 今日动作列表（含目标组数）
   const todayLogs = ref([])             // 今日训练记录
@@ -79,18 +80,54 @@ export const useTrainingStore = defineStore('training', () => {
   }
 
   /**
-   * 从 app_meta 读取计划顺延偏移
+   * 从 app_meta 读取计划偏移：
+   * - schedule_offset_days 作为基线偏移（老库全局偏移迁移而来，之后只读）
+   * - schedule_changes 为顺延时间线（JSON：[{date, offset}]），每条表示从该日期起有效偏移变为 offset
    */
   async function loadScheduleOffset() {
     try {
       const rows = await query("SELECT value FROM app_meta WHERE key = 'schedule_offset_days'", [])
       const n = rows.length ? Number(rows[0].value) : 1
-      scheduleOffset.value = Number.isFinite(n) ? n : 1
+      baselineOffset.value = Number.isFinite(n) ? n : 1
     } catch (e) {
-      scheduleOffset.value = 1
+      baselineOffset.value = 1
+    }
+    try {
+      const rows = await query("SELECT value FROM app_meta WHERE key = 'schedule_changes'", [])
+      if (rows.length) {
+        const arr = JSON.parse(rows[0].value)
+        if (Array.isArray(arr)) {
+          scheduleChanges.value = arr
+            .filter(c => c && typeof c.date === 'string' && Number.isFinite(Number(c.offset)))
+            .map(c => ({ date: c.date, offset: Number(c.offset) }))
+            .sort((a, b) => (a.date < b.date ? -1 : 1))
+        }
+      }
+    } catch (e) {
+      // 解析失败视为无顺延时间线
     }
     scheduleLoaded.value = true
   }
+
+  /** 本地日期位移：'YYYY-MM-DD' + days → 'YYYY-MM-DD'（用本地时间构造，避免 new Date('YYYY-MM-DD') 时区陷阱） */
+  function shiftDate(dateStr, days) {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    const dt = new Date(y, m - 1, d + days)
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+  }
+
+  /** 某日期当时的有效偏移：取最后一个 date <= 该日的顺延点，否则用基线 */
+  function effectiveOffsetFor(dateStr) {
+    let off = baselineOffset.value
+    for (const c of scheduleChanges.value) {
+      if (c.date <= dateStr) off = c.offset
+      else break
+    }
+    return off
+  }
+
+  /** 今天当前的有效偏移（对外暴露，兼容既有用法/预览） */
+  const scheduleOffset = computed(() => effectiveOffsetFor(todayStr()))
 
   /**
    * 加载漏练判断起始日；老库无此键时默认今天并写回（即"安装后开始判断"）
@@ -127,13 +164,20 @@ export const useTrainingStore = defineStore('training', () => {
   }
 
   /**
-   * 用当前偏移计算某日期的计划类型（普通函数，渲染期读取 scheduleOffset 会被响应式追踪）
+   * 计算某日期的计划类型：
+   * - 已执行日（historyByDate 有记录）优先返回实际执行的 day_type，保证计划与执行一致；
+   * - 否则按顺延时间线取该日期当时的有效偏移计算；
+   * - offsetOverride 传值时强制用该偏移（用于预览顺延后效果，绕过已执行日覆盖）。
    * @param {string} dateStr 本地 YYYY-MM-DD
-   * @param {number} offsetOverride 覆盖偏移（用于预览顺延后效果）
    */
-  function getDayTypeForDate(dateStr, offsetOverride = scheduleOffset.value) {
+  function getDayTypeForDate(dateStr, offsetOverride = null) {
+    if (offsetOverride == null) {
+      const logs = historyByDate.value[dateStr]
+      if (logs?.length) return logs[0].dayType
+    }
+    const offset = offsetOverride != null ? offsetOverride : effectiveOffsetFor(dateStr)
     const [y, m, d] = dateStr.split('-').map(Number)
-    return seedGetDayTypeForDate(new Date(y, m - 1, d), offsetOverride)
+    return seedGetDayTypeForDate(new Date(y, m - 1, d), offset)
   }
 
   /**
@@ -168,7 +212,7 @@ export const useTrainingStore = defineStore('training', () => {
    * 计划以 workout_day_exercises 表为准（设置页可自定义），由 planByDay 供数。
    */
   async function refreshToday() {
-    todayDayType.value = seedGetTodayDayType(scheduleOffset.value)
+    todayDayType.value = seedGetTodayDayType(effectiveOffsetFor(todayStr()))
     const dayPlan = planByDay.value[todayDayType.value] || []
     todayExercises.value = dayPlan.map((w, i) => ({ ...w, sortOrder: i }))
     await loadTodayLogs()
@@ -306,17 +350,27 @@ export const useTrainingStore = defineStore('training', () => {
     await reloadPlanAndToday()
   }
 
+  /** 顺延起点：今天已练则从明天起顺延（今天保持已执行日型），否则从今天起 */
+  const postponeStartDate = computed(() =>
+    historyByDate.value[todayStr()]?.length ? shiftDate(todayStr(), 1) : todayStr()
+  )
+
   /**
-   * 停练顺延：练三休一计划整体后移 1 天并持久化
+   * 停练顺延：从顺延起点起练三休一计划后移 1 天。
+   * 在顺延时间线写 change point（仅影响该日及之后），起点之前日期的日型保持不变。
    */
   async function postponeSchedule() {
-    const next = scheduleOffset.value + 1
+    const start = postponeStartDate.value
+    const next = effectiveOffsetFor(start) + 1
+    const list = scheduleChanges.value.filter(c => c.date !== start)
+    list.push({ date: start, offset: next })
+    list.sort((a, b) => (a.date < b.date ? -1 : 1))
     await run(
-      `INSERT INTO app_meta (key, value) VALUES ('schedule_offset_days', ?)
+      `INSERT INTO app_meta (key, value) VALUES ('schedule_changes', ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [String(next)]
+      [JSON.stringify(list)]
     )
-    scheduleOffset.value = next
+    scheduleChanges.value = list
     await refreshToday()
   }
 
@@ -605,6 +659,8 @@ export const useTrainingStore = defineStore('training', () => {
     todayDayType,
     scheduleOffset,
     scheduleLoaded,
+    postponeStartDate,
+    effectiveOffsetFor,
     missStartDate,
     loadMissStart,
     setMissStart,

@@ -54,7 +54,7 @@
       <div class="sheet-header">
         <div>
           <div class="sheet-title">停练顺延</div>
-          <div class="sheet-sub">整个练三休一计划后移 1 天</div>
+          <div class="sheet-sub">{{ postponeDateLabel }}起练三休一计划后移 1 天</div>
         </div>
         <button class="sheet-close" aria-label="关闭" @click="closePostpone">
           <AppIcon name="close" :size="16" />
@@ -63,9 +63,9 @@
 
       <div class="sheet-body">
         <p class="sheet-hint">
-          顺延后，今天（{{ todayDisplay }}）变为
+          顺延后，{{ postponeDateLabel }}（{{ startDateDisplay }}）变为
           <span class="sheet-preview">{{ previewLabel }}</span>，
-          后续排期整体后移 1 天。
+          之前日期保持不变，后续排期整体后移 1 天。
         </p>
         <p class="sheet-sub-note">已完成的训练记录不受影响。</p>
       </div>
@@ -239,9 +239,15 @@ function mdDisplay(dateStr) {
 // 停练顺延底部面板
 const postponeOpen = ref(false)
 const postponing = ref(false)
-const todayDisplay = computed(() => mdDisplay(todayStr()))
+const postponeDateLabel = computed(() =>
+  training.postponeStartDate === todayStr() ? '今天' : '明天'
+)
+const startDateDisplay = computed(() => mdDisplay(training.postponeStartDate))
 const previewLabel = computed(() => {
-  const t = training.getDayTypeForDate(todayStr(), training.scheduleOffset + 1)
+  const t = training.getDayTypeForDate(
+    training.postponeStartDate,
+    training.effectiveOffsetFor(training.postponeStartDate) + 1
+  )
   return TYPE_SHORT[t] || t
 })
 
