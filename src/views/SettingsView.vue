@@ -146,15 +146,17 @@
               <AppIcon name="save" :size="16" />
               <span>{{ savingKey ? '保存中...' : '保存 Key' }}</span>
             </button>
-            <button class="btn" @click="testKey" :disabled="!ai.hasApiKey || testingKey">
-              <AppIcon name="check" :size="16" />
-              <span>{{ testingKey ? '测试中...' : '测试连接' }}</span>
+            <button class="btn" @click="createNewSession" :disabled="!ai.hasApiKey || newSessionting">
+              <AppIcon name="sparkles" :size="16" />
+              <span>{{ newSessionting ? '新建中...' : '新建会话' }}</span>
             </button>
           </div>
           <div v-if="keyMsg" class="settings-tip" :class="{ error: keyMsg[0] === '❌' }">{{ keyMsg }}</div>
           <p class="settings-note">
             在 DeepSeek 开放平台（platform.deepseek.com）注册后创建 API Key，按 token 计费。
-            Key 仅保存在本机，不随导出数据或安装包分发；分析时会把所选时段的训练记录发送给 DeepSeek。
+            Key 仅保存在本机，不随导出数据或安装包分发。
+            点「新建会话」会清空旧会话，并把你的个人资料与训练节奏发送给 DeepSeek（消耗少量 token，顺带做连接测试）；
+            此后每次咨询前，新增的训练 / 身体 / 有氧数据会自动增量上传，只发往 DeepSeek。
           </p>
         </div>
       </div>
@@ -488,7 +490,7 @@ async function removeSlot(dayType, slot) {
 const keyInput = ref('')
 const showKey = ref(false)
 const savingKey = ref(false)
-const testingKey = ref(false)
+const newSessionting = ref(false)
 const keyMsg = ref('')
 
 async function saveKey() {
@@ -506,16 +508,17 @@ async function saveKey() {
   }
 }
 
-async function testKey() {
-  testingKey.value = true
+async function createNewSession() {
+  newSessionting.value = true
   keyMsg.value = ''
   try {
-    const msg = await ai.testConnection()
-    keyMsg.value = `✅ ${msg}`
+    await ai.createConversation()
+    keyMsg.value = '✅ 新会话已建立（连接正常）'
+    setTimeout(() => { keyMsg.value = '' }, 3000)
   } catch (e) {
-    keyMsg.value = '❌ ' + (e?.message || e)
+    keyMsg.value = '❌ 创建失败：' + (e?.message || e)
   } finally {
-    testingKey.value = false
+    newSessionting.value = false
   }
 }
 
@@ -544,7 +547,9 @@ async function confirmClear() {
   await run('DELETE FROM training_logs')
   await run('DELETE FROM body_records')
   await run('DELETE FROM aerobic_logs')
+  await run('DELETE FROM ai_messages') // 清 AI 会话，避免 AI 引用已删除数据的记忆
   await training.loadHistory()
+  await ai.load() // 刷新会话为空 → 面板回到「尚未开始会话」
   alert('已清空全部数据')
 }
 

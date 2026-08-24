@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
   value TEXT DEFAULT ''
 );
 
--- AI 咨询历史：问题 + 分析时间范围 + DeepSeek 返回结果
+-- AI 咨询历史：问题 + 分析时间范围 + DeepSeek 返回结果（v0.2.6 起不再展示，保留数据）
 CREATE TABLE IF NOT EXISTS ai_consultations (
   id TEXT PRIMARY KEY,
   date TEXT NOT NULL,
@@ -111,6 +111,17 @@ CREATE TABLE IF NOT EXISTS ai_consultations (
   result TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
+
+-- AI 会话消息（v0.2.6 持续会话）：seq 保证顺序，kind 分类（init/data/ask/preset/reply/summary）
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  kind TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL,
+  created_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_seq ON ai_messages(seq);
 `
 
 async function initWebSqlite() {
@@ -180,6 +191,15 @@ export async function initDatabase() {
       const hasDistanceKm = (aeroCols.values || []).some(c => c.name === 'distance_km')
       if (!hasDistanceKm) {
         await db.run('ALTER TABLE aerobic_logs ADD COLUMN distance_km REAL DEFAULT 0')
+      }
+
+      // 迁移：AI 增量上传水位（v0.2.6）——训练日志/身体数据/有氧记录各加 ai_uploaded 列，
+      // 标记哪些行已上传给 AI 会话，只传新增（老库升级时补列，默认 0=未上传）。
+      for (const table of ['training_logs', 'body_records', 'aerobic_logs']) {
+        const aiCols = await db.query(`PRAGMA table_info(${table})`)
+        if (!(aiCols.values || []).some(c => c.name === 'ai_uploaded')) {
+          await db.run(`ALTER TABLE ${table} ADD COLUMN ai_uploaded INTEGER NOT NULL DEFAULT 0`)
+        }
       }
 
       // 首次初始化：把预置计划写入 workout_day_exercises（表空才写入）。
