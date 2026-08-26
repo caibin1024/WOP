@@ -30,3 +30,6 @@ personal_data/
 
 # Claude Code 本机设置
 .claude/settings.local.json
+
+# 设计/素材探索草稿（肌肉图等，不入库）
+_design/

@@ -58,6 +58,17 @@
      由原生 MainActivity 读取真实 insets 注入 --safe-top-real / --safe-bottom-real，
      CSS 一律用 var(--safe-*-real, env(safe-area-inset-*)) 兜底（桌面/异常=env 值）。 */
   --easing: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 主题语义 token（深浅两主题共用；浅色值在 html[data-theme="light"] 覆盖） */
+  color-scheme: dark;
+  --bg-glow: rgba(249, 115, 22, 0.06); /* 页面顶部装饰光晕 */
+  --scrim: rgba(5, 6, 10, 0.7);        /* 底部面板/弹层遮罩 */
+  --nav-bg: rgba(10, 14, 39, 0.85);    /* 底部导航玻璃背景 */
+  --hint-bg: rgba(5, 6, 10, 0.9);      /* 「再按一次退出」胶囊 */
+  --hint-text: #FFFFFF;
+  --type-push: #f87171;                /* 推日类型文字 */
+  --type-pull: #38bdf8;                /* 拉日类型文字 */
+  --type-legs: #a78bfa;                /* 腿日类型文字 */
 }
 
 * {
@@ -76,7 +87,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Microsoft YaHei', Roboto, 'Helvetica Neue', sans-serif;
   background: var(--bg-base);
-  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(249, 115, 22, 0.06), transparent),
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, var(--bg-glow), transparent),
     linear-gradient(180deg, var(--bg-base), var(--bg-deep));
   color: var(--text-primary);
   line-height: 1.5;
@@ -171,7 +182,7 @@ body {
   padding: calc(var(--sp-4) + var(--safe-top-real, env(safe-area-inset-top))) var(--sp-4) var(--sp-4);
   /* 不透明背景：复用 body 的背景栈，静止时与页面无缝融合，滚动时遮住下方内容 */
   background-color: var(--bg-base);
-  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(249, 115, 22, 0.06), transparent),
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, var(--bg-glow), transparent),
     linear-gradient(180deg, var(--bg-base), var(--bg-deep));
 }
 
@@ -280,4 +291,58 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ============================================
+   浅色主题：html[data-theme="light"] 覆盖
+   与 :root 深色 token 一一对应，值取深一档保证对比度
+   ============================================ */
+html[data-theme="light"] {
+  color-scheme: light;
+
+  /* 背景：近白渐变 */
+  --bg-deep: #F4F6F8;
+  --bg-base: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+
+  /* 卡片：暗色低透明压在浅底 */
+  --surface: rgba(15, 23, 42, 0.05);
+  --surface-hover: rgba(15, 23, 42, 0.08);
+  --surface-active: rgba(15, 23, 42, 0.12);
+
+  /* 边框 */
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.14);
+
+  /* 文字 */
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-tertiary: #6B7280;
+
+  /* 品牌：橙保持；accent-strong 深一档供小字徽标保证 AA */
+  --accent: #F97316;
+  --accent-strong: #C2410C;
+  --accent-glow: rgba(249, 115, 22, 0.14);
+
+  /* 语义色：深一档，作文字色满足 AA；accent-dim/on-accent/danger-dim 两主题共用不改 */
+  --success: #15803D;
+  --success-dim: rgba(22, 163, 74, 0.12);
+  --warning: #B45309;
+  --danger: #DC2626;
+
+  /* 主题语义 token */
+  --bg-glow: rgba(249, 115, 22, 0.04);
+  --scrim: rgba(17, 24, 39, 0.45);
+  --nav-bg: rgba(255, 255, 255, 0.85);
+  --hint-bg: rgba(17, 24, 39, 0.92);
+  --hint-text: #FFFFFF;
+  --type-push: #DC2626;
+  --type-pull: #0284C7;
+  --type-legs: #7C3AED;
+}
+
+/* 浅色下 WebView 原生日期控件图标已自动变深，取消深色专用反相。
+   scoped CSS 无法匹配 html[data-theme]，故放全局。 */
+html[data-theme="light"] ::-webkit-calendar-picker-indicator {
+  filter: invert(0);
 }

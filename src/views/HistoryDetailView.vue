@@ -22,9 +22,14 @@
       <div v-for="g in groups" :key="g.exerciseId" class="card ex-card">
         <div class="ex-head">
           <span class="ex-name">{{ g.name }}</span>
-          <span class="ex-tag" :class="findExercise(g.exerciseId)?.isMachine ? 'machine' : 'free'">
-            {{ findExercise(g.exerciseId)?.isMachine ? '器械' : '自由' }}
-          </span>
+          <div class="ex-head-actions">
+            <span class="ex-tag" :class="findExercise(g.exerciseId)?.isMachine ? 'machine' : 'free'">
+              {{ findExercise(g.exerciseId)?.isMachine ? '器械' : '自由' }}
+            </span>
+            <button class="ex-swap" @click="openSwapPicker(g)" aria-label="更换动作">
+              <AppIcon name="exchange" :size="15" />
+            </button>
+          </div>
         </div>
         <div class="ex-sets">
           <div v-for="log in g.logs" :key="log.id" class="set-row">
@@ -79,16 +84,33 @@
       <div style="margin-top:12px">{{ date ? '这一天没有训练记录' : '未找到该日期的记录' }}</div>
       <button class="btn btn-primary" style="margin-top:16px" @click="goBack">返回训练记录</button>
     </div>
+
+    <!-- 更换动作选择面板 -->
+    <ExercisePickerSheet
+      v-if="swapPicker"
+      title="更换动作"
+      :day-label="dayTypeLabel"
+      :exercises="training.allExercises"
+      :used-ids="swapUsedIds"
+      @select="onSwapSelect"
+      @close="swapPicker = null"
+    />
+
+    <!-- 浮层/内联态纳入返回键：换动作面板、删除确认、内联编辑 -->
+    <BackLayer :show="!!swapPicker" @back="swapPicker = null" />
+    <BackLayer :show="!!deleteArmId" @back="deleteArmId = ''" />
+    <BackLayer :show="editingId !== ''" @back="cancelEdit" />
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Capacitor } from '@capacitor/core'
 import { useTrainingStore } from '../stores/training'
 import { SEED_WORKOUT_PLAN } from '../database/seed'
 import AppIcon from '../components/AppIcon.vue'
+import ExercisePickerSheet from '../components/ExercisePickerSheet.vue'
+import BackLayer from '../components/BackLayer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -170,6 +192,34 @@ async function confirmDelete(logId) {
   deleteArmId.value = ''
 }
 
+// 更换动作（整组批量换，针对"记错动作/动作库新增"的更正场景）
+const swapPicker = ref(null) // { exerciseId, name, count }
+function openSwapPicker(g) {
+  swapPicker.value = { exerciseId: g.exerciseId, name: g.name, count: g.logs.length }
+}
+// 该日其它分组的动作置灰（沿用 picker「已在该日」语义），避免误合并
+const swapUsedIds = computed(() => {
+  const cur = swapPicker.value?.exerciseId
+  const set = new Set()
+  for (const g of groups.value) {
+    if (g.exerciseId !== cur) set.add(g.exerciseId)
+  }
+  return set
+})
+async function onSwapSelect(newId) {
+  const cur = swapPicker.value
+  swapPicker.value = null
+  if (!cur || newId === cur.exerciseId) return
+  const ex = training.allExercises.find(e => e.id === newId)
+  const name = ex?.name || newId
+  if (!confirm(`将该组 ${cur.count} 组记录改为「${name}」？`)) return
+  try {
+    await training.changeLogExercise(date.value, cur.exerciseId, newId)
+  } catch (e) {
+    alert('操作失败：' + (e?.message || String(e)))
+  }
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return ''
   const [y, m, d] = dateStr.split('-')
@@ -180,20 +230,10 @@ function goBack() {
   router.back()
 }
 
-// 修复 Android 返回键直接退出应用的问题
-let backListener = null
+// 返回键由 App.vue 全局统一处理（先关浮层/内联态再返回）；顶部返回按钮走 goBack
 onMounted(async () => {
   if (!training.scheduleLoaded) await training.init()
   await training.loadHistory()
-  if (Capacitor.isNativePlatform()) {
-    try {
-      backListener = await Capacitor.Plugins.App.addListener('backButton', goBack)
-    } catch (e) { /* web 端无此事件 */ }
-  }
-})
-
-onUnmounted(() => {
-  if (backListener) backListener.remove()
 })
 </script>
 
@@ -270,6 +310,8 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border);
 }
 .ex-name {
+  flex: 1;
+  min-width: 0;
   font-size: 15px;
   font-weight: 600;
   overflow: hidden;
@@ -289,6 +331,30 @@ onUnmounted(() => {
 .ex-tag.free {
   background: rgba(251, 191, 36, 0.12);
   color: var(--warning);
+}
+.ex-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ex-swap {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s var(--easing);
+}
+.ex-swap:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .ex-sets {
   display: flex;
@@ -404,7 +470,7 @@ onUnmounted(() => {
 .edit-btn.save {
   border: none;
   background: var(--accent);
-  color: #05060A;
+  color: var(--on-accent);
   font-weight: 600;
 }
 </style>

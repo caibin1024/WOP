@@ -122,6 +122,17 @@ CREATE TABLE IF NOT EXISTS ai_messages (
   created_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_ai_messages_seq ON ai_messages(seq);
+
+-- AI 咨询记录（v0.3.1 记录列表）：每条咨询一条，独立于 ai_messages（自动摘要删会话消息不丢历史）
+CREATE TABLE IF NOT EXISTS ai_consult_records (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  question TEXT DEFAULT '',
+  reply TEXT NOT NULL DEFAULT '',
+  created_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ai_consult_records_created ON ai_consult_records(created_at);
 `
 
 async function initWebSqlite() {
@@ -269,4 +280,13 @@ export function genId() {
 export function todayStr() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * 当前日期时间 YYYY-MM-DD HH:mm
+ */
+export function nowStr() {
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }

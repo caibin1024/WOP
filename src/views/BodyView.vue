@@ -176,7 +176,7 @@ onMounted(() => {
 .stats-row {
   display: flex;
   gap: 10px;
-  padding: 0 16px 12px;
+  padding: 10px 16px 12px;
 }
 .stat-card {
   flex: 1;
@@ -188,7 +188,7 @@ onMounted(() => {
 .stat-value {
   font-size: 22px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 .stat-unit {
   font-size: 11px;

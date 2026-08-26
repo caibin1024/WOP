@@ -339,7 +339,7 @@ onMounted(() => {
 .tab-bar {
   display: flex;
   gap: 8px;
-  padding: 0 16px 12px;
+  padding: 10px 16px 12px;
 }
 .tab-btn {
   flex: 1;
@@ -373,7 +373,7 @@ onMounted(() => {
 .stat-value {
   font-size: 22px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 .stat-unit {
   font-size: 11px;
@@ -494,11 +494,11 @@ onMounted(() => {
 }
 .aerobic-type.type-stair {
   background: rgba(56, 189, 248, 0.15);
-  color: #38bdf8;
+  color: var(--type-pull);
 }
 .aerobic-type.type-treadmill {
   background: rgba(167, 139, 250, 0.16);
-  color: #a78bfa;
+  color: var(--type-legs);
 }
 .del-btn {
   margin-left: auto;

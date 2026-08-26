@@ -632,6 +632,23 @@ export const useTrainingStore = defineStore('training', () => {
   }
 
   /**
+   * 更换某日某动作分组的全部记录为另一动作：
+   * 同步改 exercise_id + exercise_name 快照列（保持显示/导出/AI 名字一致）；
+   * 重置 ai_uploaded，让 AI 下次咨询时把更正后的数据重新同步。
+   */
+  async function changeLogExercise(date, oldExerciseId, newExerciseId) {
+    if (oldExerciseId === newExerciseId) return
+    const ex = allExercises.value.find(e => e.id === newExerciseId)
+    const name = ex?.name || newExerciseId
+    await run(
+      'UPDATE training_logs SET exercise_id = ?, exercise_name = ?, ai_uploaded = 0 WHERE date = ? AND exercise_id = ?',
+      [newExerciseId, name, date, oldExerciseId]
+    )
+    await loadTodayLogs()
+    await loadHistory()
+  }
+
+  /**
    * 获取某动作的历史最佳重量
    */
   async function getExerciseBest(exerciseId) {
@@ -695,6 +712,7 @@ export const useTrainingStore = defineStore('training', () => {
     removeDraftSet,
     updateLog,
     deleteLog,
+    changeLogExercise,
     loadTodayLogs,
     loadHistory,
     getExerciseBest,

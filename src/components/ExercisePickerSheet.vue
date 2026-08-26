@@ -66,7 +66,7 @@ const grouped = computed(() =>
 .picker-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 10, 0.7);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: flex-end;

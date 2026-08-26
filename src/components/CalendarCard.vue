@@ -109,6 +109,10 @@
       </div>
     </div>
   </div>
+
+  <!-- 两个底部面板纳入返回键（返回键先关面板，不退出） -->
+  <BackLayer :show="postponeOpen" @back="closePostpone" />
+  <BackLayer :show="missStartOpen" @back="closeMissStart" />
 </template>
 
 <script setup>
@@ -116,6 +120,7 @@ import { ref, computed, onBeforeUnmount } from 'vue'
 import { useTrainingStore } from '../stores/training'
 import { todayStr } from '../database'
 import AppIcon from './AppIcon.vue'
+import BackLayer from './BackLayer.vue'
 
 const emit = defineEmits(['select-date'])
 const training = useTrainingStore()
@@ -311,7 +316,7 @@ onBeforeUnmount(clearPress)
 
 <style scoped>
 .cal-card {
-  margin: 0 16px 16px;
+  margin: 10px 16px 16px;
   padding: 14px 16px;
 }
 .cal-head {
@@ -435,13 +440,13 @@ onBeforeUnmount(clearPress)
   text-align: center;
 }
 .cal-type.push {
-  color: #f87171;
+  color: var(--type-push);
 }
 .cal-type.pull {
-  color: #38bdf8;
+  color: var(--type-pull);
 }
 .cal-type.legs {
-  color: #a78bfa;
+  color: var(--type-legs);
 }
 .cal-type.rest {
   color: var(--text-tertiary);
@@ -467,7 +472,7 @@ onBeforeUnmount(clearPress)
 .sheet-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 10, 0.7);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: flex-end;

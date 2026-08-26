@@ -5,7 +5,7 @@
         <h1>训练记录</h1>
         <div class="subtitle">共 {{ totalDays }} 天训练 · {{ totalSets }} 组</div>
       </div>
-      <button class="btn btn-primary ai-btn" @click="aiOpen = true">
+      <button class="btn btn-primary ai-btn" @click="router.push('/ai')">
         <AppIcon name="sparkles" :size="16" />
         <span>AI 咨询</span>
       </button>
@@ -37,9 +37,6 @@
       <AppIcon name="chart" :size="44" style="color: var(--text-tertiary)" />
       <div style="margin-top:12px">还没有训练记录，去开始第一次训练吧！</div>
     </div>
-
-    <!-- AI 咨询下穿面板 -->
-    <AiPanel v-if="aiOpen" @close="aiOpen = false" />
   </div>
 </template>
 
@@ -50,12 +47,10 @@ import { useTrainingStore } from '../stores/training'
 import { SEED_WORKOUT_PLAN } from '../database/seed'
 import AppIcon from '../components/AppIcon.vue'
 import CalendarCard from '../components/CalendarCard.vue'
-import AiPanel from '../components/AiPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
 const training = useTrainingStore()
-const aiOpen = ref(false)
 
 const historyByDate = computed(() => training.historyByDate)
 const sortedDates = computed(() => Object.keys(historyByDate.value).sort().reverse())

@@ -52,6 +52,12 @@ const routes = [
     name: 'settings',
     component: () => import('../views/SettingsView.vue'),
     meta: { title: '设置' }
+  },
+  {
+    path: '/ai',
+    name: 'ai',
+    component: () => import('../views/AiConsultView.vue'),
+    meta: { title: 'AI 咨询' }
   }
 ]
 

@@ -108,6 +108,17 @@ export const SEED_EXERCISES = [
     tips: '这是增加背部厚度的核心动作。拉到底时把肩胛骨往中间夹，想象两个肩胛骨之间能夹住一支笔'
   },
   {
+    id: 'machine-row',
+    recommendedWeightKg: 30, // 配重（建议起始）
+    name: '器械划船',
+    category: 'back',
+    isMachine: true,
+    targetMuscle: '背阔肌、斜方肌中下、菱形肌',
+    instructions: '1. 坐入划船机，胸口贴紧胸托垫，双脚踩实踏板，膝盖微曲\n2. 双手握把手，挺胸直背，肩胛骨自然前送\n3. 呼气，将把手拉向腹部，肩胛骨后收夹紧\n4. 顶峰收缩1秒，吸气缓慢还原至背部有拉伸感\n5. 全程胸口贴住胸托，不要用腰或惯性借力',
+    commonMistakes: '1. 胸口离开胸托，身体后仰借力\n2. 耸肩，斜方肌上部代偿\n3. 拉得太高（拉到胸口而非腹部）\n4. 还原时完全放松，背肌失去张力',
+    tips: '器械轨迹固定、重心稳，比绳索更容易孤立背部，适合堆重量。要点和坐姿绳索划船一样是顶峰夹紧肩胛骨，两个动作互补练'
+  },
+  {
     id: 'face-pull',
     recommendedWeightKg: 8, // 配重（建议起始）
     name: '面拉',
@@ -282,6 +293,150 @@ export const SEED_EXERCISES = [
     instructions: '1. 双脚与肩同宽，脚尖略外展\n2. 吸气，屈髋屈膝下蹲，臀部向后坐\n3. 下蹲至大腿与地面平行或更低\n4. 呼气，站起还原\n5. 膝盖方向与脚尖一致',
     commonMistakes: '1. 膝盖内扣\n2. 脚跟离地\n3. 弯腰弓背\n4. 下蹲过浅',
     tips: '既是热身也是检验深蹲姿势的好机会，重点关注"膝盖对齐脚尖"'
+  },
+
+  // ============ 器械布局调整后的替代动作（哑铃区可调角度躺椅已撤）============
+  {
+    id: 'smith-shoulder-press',
+    recommendedWeightKg: 15, // 配重（建议起始）
+    name: '史密斯机肩推（坐姿）',
+    category: 'shoulder',
+    isMachine: true,
+    targetMuscle: '三角肌前束、中束、三头',
+    instructions: '1. 将史密斯机靠背调至接近垂直（约80°），坐在凳上，双脚踩实\n2. 双手略宽于肩握杆，杠位于锁骨上方\n3. 呼气，向上推起杠铃至手臂接近伸直（手肘微曲不锁死）\n4. 顶端稍作停顿，吸气缓慢下放至杠略低于下巴\n5. 全程核心收紧，背部贴实靠垫',
+    commonMistakes: '1. 靠背放太斜，肩部压力增大\n2. 下放过深，肩关节过度拉伸\n3. 耸肩，三角肌受力减弱\n4. 手腕后仰受压',
+    tips: '史密斯轨迹固定，可专注三角肌发力，替代哑铃肩推时重点调整靠背角度'
+  },
+  {
+    id: 'machine-shoulder-press',
+    recommendedWeightKg: 15, // 配重（建议起始）
+    name: '坐姿器械肩推',
+    category: 'shoulder',
+    isMachine: true,
+    targetMuscle: '三角肌前束、中束、三头',
+    instructions: '1. 调节座椅高度，把手约与肩同高\n2. 背部贴实靠垫，双手握把手，双脚踩实\n3. 呼气，向上推起至手臂接近伸直\n4. 吸气，缓慢下放至手肘略低于肩\n5. 全程挺胸收肩胛，不要耸肩',
+    commonMistakes: '1. 座椅太高或太低，发力方向错误\n2. 下放过深，肩部压力大\n3. 肩胛骨离开靠垫\n4. 快速下放失去控制',
+    tips: '器械肩推轨迹固定、稳定好上手，配重从轻开始，先找到三角肌的发力感'
+  },
+  {
+    id: 'barbell-overhead-press',
+    recommendedWeightKg: 15, // 配重（建议起始）
+    name: '杠铃站姿肩推',
+    category: 'shoulder',
+    isMachine: false,
+    targetMuscle: '三角肌前束、中束、三头',
+    instructions: '1. 站姿，双脚与肩同宽，杠铃置于锁骨前\n2. 双手略宽于肩握杆，收紧核心与臀部\n3. 呼气，垂直向上推起杠铃过头至手臂伸直\n4. 吸气，缓慢下放回锁骨前，保持躯干稳定\n5. 全程不要过度后仰，腰部保持中立',
+    commonMistakes: '1. 腰椎过度后仰借力\n2. 杠铃轨迹向前偏移\n3. 手腕后仰受压\n4. 耸肩',
+    tips: '站姿推举考验核心稳定，重量宁轻勿重；腰部不适可换史密斯机或坐姿器械'
+  },
+  {
+    id: 'smith-bench-press',
+    recommendedWeightKg: 25, // 配重（建议起始）
+    name: '史密斯机卧推',
+    category: 'chest',
+    isMachine: true,
+    targetMuscle: '胸大肌、三头、三角肌前束',
+    instructions: '1. 平躺于卧推凳，双眼位于杠的正下方\n2. 双手略宽于肩握杆，双脚踩实地面\n3. 呼气，向上推起杠铃至手臂伸直\n4. 吸气，缓慢下放至杠轻触胸口\n5. 全程肩胛骨后收下沉，臀部不离凳',
+    commonMistakes: '1. 下放时肘部过度外展，呈T型\n2. 臀部离开凳面\n3. 手腕后仰\n4. 下放速度失控',
+    tips: '史密斯轨迹固定，可专注胸肌发力；安全钩让大重量也能独立完成'
+  },
+  {
+    id: 'barbell-bench-press',
+    recommendedWeightKg: 25, // 配重（建议起始）
+    name: '杠铃平板卧推',
+    category: 'chest',
+    isMachine: false,
+    targetMuscle: '胸大肌、三头、三角肌前束',
+    instructions: '1. 平躺，双眼在杠正下方，双手略宽于肩握杆\n2. 肩胛骨后收下压，双脚踩实\n3. 出杠后呼气，推起至手臂伸直\n4. 吸气，控制下放至杠轻触下胸位置\n5. 全程手腕中立，臀部不离凳',
+    commonMistakes: '1. 没同伴保护时挑战过大重量\n2. 臀部离凳、腰部反弓\n3. 下放速度失控\n4. 肘部过度外展',
+    tips: '自由杠铃需控制平衡与轨迹，务必有人保护或使用安全架；重量循序渐进'
+  },
+  {
+    id: 'barbell-bentover-row',
+    recommendedWeightKg: 30, // 配重（建议起始）
+    name: '杠铃俯身划船',
+    category: 'back',
+    isMachine: false,
+    targetMuscle: '背阔肌、斜方肌中下、菱形肌',
+    instructions: '1. 屈髋俯身，躯干约与地面成45°，背部平直\n2. 双手与肩同宽握杠，自然下垂\n3. 呼气，将杠拉向腹部下缘，肩胛骨收紧\n4. 吸气，控制下放回起始位\n5. 全程核心绷紧，不要弯腰',
+    commonMistakes: '1. 弯腰驼背\n2. 用腰部上下晃动借力\n3. 耸肩\n4. 幅度过大导致身体摆动',
+    tips: '俯身角度越大对下背压力越大，核心绷紧；重量以能保持背部平直为准'
+  },
+  {
+    id: 'dumbbell-row',
+    recommendedWeightKg: 12, // 单边（建议起始）
+    name: '单臂哑铃划船',
+    category: 'back',
+    isMachine: false,
+    targetMuscle: '背阔肌、菱形肌、大圆肌',
+    instructions: '1. 单侧手掌和同侧膝撑在平凳上，另一腿站地\n2. 另一手抓哑铃自然下垂，背部平直\n3. 呼气，将哑铃拉向髋部方向，肘部贴身\n4. 吸气，控制下放\n5. 每组做完换边',
+    commonMistakes: '1. 身体旋转借力\n2. 耸肩\n3. 幅度过大导致肩前移\n4. 下放太快',
+    tips: '单臂划船可独立训练两侧背肌，纠正不平衡；想象用肘部带动重量'
+  },
+  {
+    id: 'cable-curl',
+    recommendedWeightKg: 15, // 配重（建议起始）
+    name: '绳索弯举',
+    category: 'biceps',
+    isMachine: true,
+    targetMuscle: '肱二头肌、肱肌',
+    instructions: '1. 面对龙门架，双手握绳头或直杆，大臂贴紧体侧\n2. 肘部固定，呼气，弯举至小臂与地面垂直\n3. 顶峰收缩1秒\n4. 吸气，控制下放至手臂接近伸直\n5. 全程肘部不离开身体',
+    commonMistakes: '1. 大臂离开体侧\n2. 身体后仰借力\n3. 下放不完全\n4. 用爆发力甩动',
+    tips: '绳索弯举全程保持张力，底部不借惯性；肘部固定是孤立二头的关键'
+  },
+  {
+    id: 'barbell-curl',
+    recommendedWeightKg: 15, // 配重（建议起始）
+    name: '杠铃弯举',
+    category: 'biceps',
+    isMachine: false,
+    targetMuscle: '肱二头肌、肱肌',
+    instructions: '1. 站姿，双手与肩同宽握杆，大臂贴紧体侧\n2. 肘部固定，呼气，弯举至前臂接近垂直\n3. 顶峰稍作停顿\n4. 吸气，控制下放至手臂伸直\n5. 全程身体不晃动',
+    commonMistakes: '1. 身体晃动借力\n2. 肘部前移\n3. 手腕过度弯曲\n4. 下放太快',
+    tips: '杠铃弯举能上更大重量；若手腕不适可用曲杆或绳索替代'
+  },
+  {
+    id: 'overhead-cable-triceps-extension',
+    recommendedWeightKg: 10, // 配重（建议起始）
+    name: '绳索过顶三头屈伸',
+    category: 'triceps',
+    isMachine: true,
+    targetMuscle: '肱三头肌长头',
+    instructions: '1. 背对龙门架，双手握绳头举过头顶，大臂贴近耳朵\n2. 肘部朝前固定，呼气，向下伸直手臂\n3. 三头收紧1秒\n4. 吸气，控制回放至手肘约90度\n5. 全程大臂保持稳定',
+    commonMistakes: '1. 大臂外扩\n2. 用背发力\n3. 肘部打开\n4. 回放太快',
+    tips: '过顶动作重点刺激三头长头；重量宁轻，保证肘部全程稳定'
+  },
+  {
+    id: 'smith-squat',
+    recommendedWeightKg: 30, // 配重（建议起始）
+    name: '史密斯机深蹲',
+    category: 'legs',
+    isMachine: true,
+    targetMuscle: '股四头肌、臀大肌、腘绳肌',
+    instructions: '1. 调整杠高度至肩部，杠置于斜方肌上，解锁安全钩\n2. 双脚与肩同宽，脚尖略外展\n3. 吸气，下蹲至大腿与地面平行或略低，膝盖与脚尖方向一致\n4. 呼气，蹬地站起，膝盖不完全锁死\n5. 全程背部平直，脚跟踩实',
+    commonMistakes: '1. 膝盖内扣\n2. 脚跟离地\n3. 弯腰弓背\n4. 下蹲过浅',
+    tips: '史密斯固定轨迹，适合打磨深蹲动作；先空杆或轻重量找蹲姿，再逐步加重'
+  },
+  {
+    id: 'hack-squat',
+    recommendedWeightKg: 40, // 配重（建议起始）
+    name: '哈克深蹲',
+    category: 'legs',
+    isMachine: true,
+    targetMuscle: '股四头肌、臀大肌',
+    instructions: '1. 肩背贴实哈克机靠垫，双脚踩在踏板上与肩同宽\n2. 解锁安全把手，腿部支撑重量\n3. 吸气，下蹲至大腿与小腿接近垂直\n4. 呼气，蹬回起始位，膝盖不完全锁死\n5. 全程臀部不离开靠垫',
+    commonMistakes: '1. 下蹲过深伤膝\n2. 膝盖内扣\n3. 臀部离开靠垫\n4. 快速蹬回失去控制',
+    tips: '哈克深蹲对下背压力小，可放心上量；调整脚尖位置可侧重不同腿部肌群'
+  },
+  {
+    id: 'hanging-leg-raise',
+    name: '悬垂举腿',
+    category: 'core',
+    isMachine: false,
+    targetMuscle: '腹直肌下部、髂腰肌',
+    instructions: '1. 悬垂于单杠，双手与肩同宽，身体自然下垂\n2. 收核心，呼气，卷腹将双腿抬至与地面平行或更高\n3. 顶峰稍作停顿\n4. 吸气，控制下放回起始位\n5. 全程不要摆动借力',
+    commonMistakes: '1. 用摆动借力\n2. 耸肩\n3. 下放太快失控\n4. 只靠髋部上抬',
+    tips: '直腿困难可先做屈膝抬腿；核心收紧、控制下放是刺激腹部的关键'
   }
 ]
 

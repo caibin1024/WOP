@@ -20,7 +20,7 @@
       <AppIcon name="heart" :size="52" style="color: var(--text-tertiary); margin-bottom: 12px" />
       <h3 style="margin-bottom:8px">今天是休息日</h3>
       <p>不做力量训练，去做点有氧放松恢复吧</p>
-      <router-link to="/aerobic" class="btn btn-primary" style="margin-top:16px; text-decoration:none">
+      <router-link to="/aerobic" replace class="btn btn-primary" style="margin-top:16px; text-decoration:none">
         去记录有氧
         <AppIcon name="arrow-right" :size="18" />
       </router-link>
@@ -165,6 +165,9 @@
         </div>
       </div>
     </div>
+
+    <!-- 动作教学面板纳入返回键 -->
+    <BackLayer :show="!!teachExercise" @back="teachExercise = null" />
   </div>
 </template>
 
@@ -175,6 +178,7 @@ import { todayStr } from '../database'
 import { SEED_WORKOUT_PLAN } from '../database/seed'
 import { KeepAwake } from '@capacitor-community/keep-awake'
 import AppIcon from '../components/AppIcon.vue'
+import BackLayer from '../components/BackLayer.vue'
 
 const training = useTrainingStore()
 
@@ -420,7 +424,7 @@ onUnmounted(async () => {
 }
 
 .exercise-list {
-  padding: 0 16px;
+  padding: 10px 16px;
 }
 .exercise-card {
   margin-bottom: 10px;
@@ -577,7 +581,7 @@ onUnmounted(async () => {
 .teach-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 6, 10, 0.7);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: flex-end;

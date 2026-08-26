@@ -68,9 +68,8 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Capacitor } from '@capacitor/core'
 import { useTrainingStore } from '../stores/training'
 import { MUSCLE_GROUP_LABELS } from '../models'
 import AppIcon from '../components/AppIcon.vue'
@@ -92,8 +91,7 @@ function goBack() {
   router.back()
 }
 
-// 修复 Android 返回键直接退出应用的问题
-let backListener = null
+// 返回键由 App.vue 全局统一处理；顶部返回按钮走 goBack
 onMounted(async () => {
   try {
     await training.loadPlan()
@@ -104,15 +102,6 @@ onMounted(async () => {
       )
     }
   } catch (e) { /* 计划加载失败不阻塞页面 */ }
-  if (Capacitor.isNativePlatform()) {
-    try {
-      backListener = await Capacitor.Plugins.App.addListener('backButton', goBack)
-    } catch (e) { /* web 端无此事件 */ }
-  }
-})
-
-onUnmounted(() => {
-  if (backListener) backListener.remove()
 })
 </script>
 

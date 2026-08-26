@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { initDatabase, query, run, genId, todayStr } from '../database'
+import { initDatabase, query, run, genId, todayStr, nowStr } from '../database'
 import {
   callDeepSeek,
   SYSTEM_PROMPT,
@@ -26,6 +26,7 @@ export const useAiStore = defineStore('ai', () => {
   const hasApiKey = computed(() => !!apiKey.value.trim())
   const messages = ref([]) // [{ id, seq, role, kind, content, createdAt }]
   const hasConversation = computed(() => messages.value.length > 0)
+  const records = ref([]) // [{ id, kind, title, question, reply, createdAt }] 咨询记录列表（最新在前）
   const isLoading = ref(false)
   const error = ref('')
 
@@ -34,6 +35,7 @@ export const useAiStore = defineStore('ai', () => {
     const rows = await query("SELECT value FROM app_meta WHERE key = 'deepseek_api_key'", [])
     apiKey.value = rows.length ? rows[0].value : ''
     await loadMessages()
+    await loadRecords()
   }
 
   async function loadMessages() {
@@ -46,6 +48,40 @@ export const useAiStore = defineStore('ai', () => {
       content: r.content,
       createdAt: r.created_at
     }))
+  }
+
+  async function loadRecords() {
+    const rows = await query('SELECT * FROM ai_consult_records ORDER BY created_at DESC, id DESC', [])
+    records.value = rows.map(r => ({
+      id: r.id,
+      kind: r.kind,
+      title: r.title,
+      question: r.question,
+      reply: r.reply,
+      createdAt: r.created_at
+    }))
+  }
+
+  /** 写入一条咨询记录（独立于会话消息，自动摘要不丢历史） */
+  async function insertRecord({ kind, title, question, reply }) {
+    const id = genId()
+    const createdAt = nowStr()
+    await run(
+      'INSERT INTO ai_consult_records (id, kind, title, question, reply, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, kind, title, question, reply, createdAt]
+    )
+    return { id, kind, title, question, reply, createdAt }
+  }
+
+  /** 记录标题：预设 → 预设标签；提问 → 去空白 + 截断 */
+  function makeRecordTitle(kind, content) {
+    if (kind === 'preset') {
+      if (content.includes('今日训练建议')) return '今日训练建议'
+      if (content.includes('今日训练总结')) return '今日训练总结'
+      return '综合分析'
+    }
+    const s = String(content || '').replace(/\s+/g, ' ').trim()
+    return s.length > 26 ? s.slice(0, 26) + '…' : s
   }
 
   async function nextSeq() {
@@ -98,6 +134,13 @@ export const useAiStore = defineStore('ai', () => {
         ]
       })
       await run('DELETE FROM ai_messages', [])
+      await run('DELETE FROM ai_consult_records', []) // 新建会话重置记录列表
+      records.value = []
+      // 清空会话后旧数据仍带 ai_uploaded=1，会让新会话永远看不到历史训练/身体/有氧数据。
+      // 重置三个表的上传水位，使下次咨询自动把全部数据重新同步给 AI。
+      for (const t of ['training_logs', 'body_records', 'aerobic_logs']) {
+        await run(`UPDATE ${t} SET ai_uploaded = 0`, [])
+      }
       const initMsg = await insertMessage({ role: 'user', kind: 'init', content: initContent })
       const replyMsg = await insertMessage({ role: 'assistant', kind: 'reply', content: reply })
       messages.value = [initMsg, replyMsg]
@@ -147,12 +190,11 @@ export const useAiStore = defineStore('ai', () => {
    */
   async function sendRequest({ userContent, kind }) {
     requireKey()
-    if (!hasConversation.value) {
-      const msg = '尚未开始会话，请先新建会话'
-      error.value = msg
-      throw new Error(msg)
-    }
     if (isLoading.value) return
+    // 首次使用自动建会话（发初始上下文 + 连接测试）；已有会话则跳过
+    if (!hasConversation.value) {
+      await createConversation()
+    }
     isLoading.value = true
     error.value = ''
     try {
@@ -189,6 +231,15 @@ export const useAiStore = defineStore('ai', () => {
         if (dataUpdate.bodyIds.length) await markUploaded('body_records', dataUpdate.bodyIds)
         if (dataUpdate.aerobicIds.length) await markUploaded('aerobic_logs', dataUpdate.aerobicIds)
       }
+
+      // 6. 写入咨询记录（独立于会话消息，列表展示用；自动摘要不丢历史）
+      const rec = await insertRecord({
+        kind,
+        title: makeRecordTitle(kind, userContent),
+        question: userContent,
+        reply
+      })
+      records.value.unshift(rec)
 
       messages.value.push(...added)
       return reply
@@ -237,6 +288,7 @@ export const useAiStore = defineStore('ai', () => {
     hasApiKey,
     messages,
     hasConversation,
+    records,
     isLoading,
     error,
     load,

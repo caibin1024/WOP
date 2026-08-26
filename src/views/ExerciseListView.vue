@@ -6,18 +6,18 @@
         <h1>动作库</h1>
         <div class="subtitle">{{ exercises.length }} 个动作 · 点击查看教学</div>
       </div>
-
-      <!-- 分类筛选 -->
-      <div class="filter-row">
-        <button v-for="c in categories" :key="c.key" class="filter-chip"
-                :class="{ active: activeCat === c.key }" @click="activeCat = c.key">
-          {{ c.label }}
-        </button>
-      </div>
     </div>
 
+    <!-- 分类筛选 -->
+    <div class="filter-row">
+      <button v-for="c in categories" :key="c.key" class="filter-chip"
+        :class="{ active: activeCat === c.key }" @click="activeCat = c.key">
+        {{ c.label }}
+      </button>
+    </div>
     <!-- 动作列表 -->
     <div class="exercise-grid">
+    
       <router-link v-for="e in filteredExercises" :key="e.id" :to="`/exercises/${e.id}`"
                    class="exercise-item card">
         <div class="item-icon" :class="e.isMachine ? 'icon-machine' : 'icon-free'">
@@ -79,18 +79,19 @@ const filteredExercises = computed(() => {
   top: 0;
   z-index: 40;
   background-color: var(--bg-base);
-  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(249, 115, 22, 0.06), transparent),
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, var(--bg-glow), transparent),
     linear-gradient(180deg, var(--bg-base), var(--bg-deep));
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
-/* 内层标题不再自己 sticky（冻结块整体已固定），背景交给容器 */
+/* 内层标题不再自己 sticky（冻结块整体已固定），背景交给容器；
+   底部间距用全局标准值，保持与其它页面 header 高度一致 */
 .head-sticky .page-header {
   position: static;
   background: transparent;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border-bottom: none;
-  padding-bottom: var(--sp-1);
+  padding-bottom: var(--sp-4);
 }
 .filter-row {
   display: flex;

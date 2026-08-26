@@ -11,6 +11,31 @@
     </div>
 
     <div class="page-padding settings-list">
+      <!-- 外观：主题切换 -->
+      <div class="setting-group">
+        <button class="setting-row" @click="toggleGroup('appearance')" aria-expanded="openGroups.appearance">
+          <AppIcon name="theme" :size="20" class="row-icon" />
+          <div class="row-text">
+            <span class="row-title">外观</span>
+            <span class="row-sub">{{ themeSub }}</span>
+          </div>
+          <AppIcon name="chevron-down" :size="18" class="row-chevron" :class="{ open: openGroups.appearance }" />
+        </button>
+        <div v-show="openGroups.appearance" class="setting-body">
+          <div class="theme-seg" role="radiogroup" aria-label="主题">
+            <button
+              v-for="opt in THEME_OPTIONS"
+              :key="opt.value"
+              class="theme-seg-btn"
+              :class="{ current: theme.mode === opt.value }"
+              :aria-pressed="theme.mode === opt.value"
+              @click="theme.setMode(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
+          <p class="settings-note">「跟随系统」会自动匹配手机的深色 / 浅色设置。</p>
+        </div>
+      </div>
+
       <!-- 训练计划（训练节奏 + 计划动作配置） -->
       <div class="setting-group">
         <button class="setting-row" @click="toggleGroup('plan')" aria-expanded="openGroups.plan">
@@ -269,22 +294,26 @@
       @select="onPickerSelect"
       @close="picker = null"
     />
+
+    <!-- 选动作面板纳入返回键 -->
+    <BackLayer :show="!!picker" @back="picker = null" />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Capacitor } from '@capacitor/core'
 import { useTrainingStore } from '../stores/training'
 import { useProfileStore } from '../stores/profile'
 import { useBodyStore } from '../stores/body'
 import { useAiStore } from '../stores/ai'
+import { useThemeStore } from '../stores/theme'
 import { exportAllData } from '../services/exportData'
 import { PLAN_LABELS } from '../database/seed'
 import { initDatabase, run } from '../database'
 import AppIcon from '../components/AppIcon.vue'
 import ExercisePickerSheet from '../components/ExercisePickerSheet.vue'
+import BackLayer from '../components/BackLayer.vue'
 import { APP_VERSION } from '../version'
 
 const router = useRouter()
@@ -292,6 +321,20 @@ const training = useTrainingStore()
 const profile = useProfileStore()
 const body = useBodyStore()
 const ai = useAiStore()
+const theme = useThemeStore()
+
+// 外观：三档主题选项 + 分组副标题
+const THEME_OPTIONS = [
+  { value: 'dark', label: '深色' },
+  { value: 'light', label: '浅色' },
+  { value: 'system', label: '跟随系统' }
+]
+const THEME_LABEL = { dark: '深色', light: '浅色', system: '跟随系统' }
+const themeSub = computed(() => {
+  const label = THEME_LABEL[theme.mode] || '跟随系统'
+  if (theme.mode === 'system') return `${label} · 当前${theme.effective === 'dark' ? '深色' : '浅色'}`
+  return label
+})
 
 const exporting = ref(false)
 const exportResult = ref('')
@@ -299,7 +342,7 @@ const savingProfile = ref(false)
 const profileSaved = ref('')
 
 // 分组收折状态：默认全部收起，点击分组行展开/收起（各自独立开合）
-const openGroups = reactive({ plan: false, ai: false, data: false, profile: false, about: false })
+const openGroups = reactive({ appearance: false, plan: false, ai: false, data: false, profile: false, about: false })
 function toggleGroup(key) {
   openGroups[key] = !openGroups[key]
 }
@@ -548,6 +591,7 @@ async function confirmClear() {
   await run('DELETE FROM body_records')
   await run('DELETE FROM aerobic_logs')
   await run('DELETE FROM ai_messages') // 清 AI 会话，避免 AI 引用已删除数据的记忆
+  await run('DELETE FROM ai_consult_records') // 清 AI 咨询记录列表
   await training.loadHistory()
   await ai.load() // 刷新会话为空 → 面板回到「尚未开始会话」
   alert('已清空全部数据')
@@ -577,8 +621,7 @@ function goBack() {
   }
 }
 
-// 修复 Android 返回键：设置页无历史时不应直接退出应用
-let backListener = null
+// 返回键由 App.vue 全局统一处理；顶部返回按钮走 goBack
 onMounted(async () => {
   await training.init().catch(e => console.error('训练初始化失败', e))
   await Promise.all([
@@ -589,15 +632,6 @@ onMounted(async () => {
   keyInput.value = ai.apiKey
   syncEdits()
   syncDefaults()
-  if (Capacitor.isNativePlatform()) {
-    try {
-      backListener = await Capacitor.Plugins.App.addListener('backButton', goBack)
-    } catch (e) { /* web 端无此事件 */ }
-  }
-})
-
-onUnmounted(() => {
-  if (backListener) backListener.remove()
 })
 </script>
 
@@ -607,6 +641,36 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* 外观：三档主题分段（复用 .cycle-day 视觉语言：选中=橙底深字+光晕） */
+.theme-seg {
+  display: flex;
+  gap: 8px;
+}
+.theme-seg-btn {
+  flex: 1;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s var(--easing);
+}
+.theme-seg-btn.current {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: transparent;
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+.theme-seg-btn:active {
+  transform: scale(0.97);
+}
+.theme-seg-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .setting-group {
   background: var(--surface);
@@ -671,6 +735,7 @@ onUnmounted(() => {
 .settings-header {
   display: flex;
   align-items: center;
+  margin-bottom:10px;
   gap: 2px;
 }
 .back-btn {

@@ -4,8 +4,29 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0A0E27" />
+    <meta name="theme-color" id="theme-color" content="#0A0E27" />
     <title>WOP</title>
+    <script>
+      // 首帧前应用主题，避免闪色（FOUC）。
+      // ⚠️ 三段解析逻辑与 src/stores/theme.js 的 resolveEffective 保持一致，修改需两处同步。
+      (function () {
+        var mode = 'system'
+        try { mode = localStorage.getItem('wop_theme') || 'system' } catch (e) {}
+        var effective
+        try {
+          effective = (mode === 'dark' || mode === 'light')
+            ? mode
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        } catch (e) {
+          effective = 'dark'
+        }
+        var root = document.documentElement
+        root.setAttribute('data-theme', effective)
+        root.style.colorScheme = effective
+        var meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.setAttribute('content', effective === 'light' ? '#FFFFFF' : '#0A0E27')
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>
