@@ -3,8 +3,9 @@ import { ref, computed } from 'vue'
 import { initDatabase, query, run, genId } from '../database'
 
 /**
- * 有氧模块 Store（type = 'swim' 游泳 / 'stair' 爬楼机 / 'treadmill' 跑步机）
- * 共用 aerobic_logs 表：游泳记 distance_m（米），爬楼机记 floors（层），跑步机记 distance_km（千米）
+ * 有氧模块 Store（type = 'swim' 游泳 / 'stair' 爬楼机 / 'treadmill' 跑步机 / 'bike' 动感单车）
+ * 共用 aerobic_logs 表：游泳记 distance_m（米）；爬楼机/跑步机/动感单车记 distance_km（千米）。
+ * floors 为历史层数列（stair 1.0.1 起改公里，仅保留旧数据）。
  */
 export const useAerobicStore = defineStore('aerobic', () => {
   const logs = ref([])
@@ -14,18 +15,23 @@ export const useAerobicStore = defineStore('aerobic', () => {
   const swimLogs = computed(() => logs.value.filter(l => l.type === 'swim'))
   const stairLogs = computed(() => logs.value.filter(l => l.type === 'stair'))
   const treadmillLogs = computed(() => logs.value.filter(l => l.type === 'treadmill'))
+  const bikeLogs = computed(() => logs.value.filter(l => l.type === 'bike'))
 
   // 游泳统计
   const swimTotalDistance = computed(() => swimLogs.value.reduce((s, l) => s + (l.distanceM || 0), 0))
   const swimTotalSessions = computed(() => swimLogs.value.length)
 
-  // 爬楼机统计
-  const stairTotalFloors = computed(() => stairLogs.value.reduce((s, l) => s + (l.floors || 0), 0))
+  // 爬楼机统计（公里）
+  const stairTotalDistance = computed(() => stairLogs.value.reduce((s, l) => s + (l.distanceKm || 0), 0))
   const stairTotalSessions = computed(() => stairLogs.value.length)
 
   // 跑步机统计
   const treadmillTotalDistance = computed(() => treadmillLogs.value.reduce((s, l) => s + (l.distanceKm || 0), 0))
   const treadmillTotalSessions = computed(() => treadmillLogs.value.length)
+
+  // 动感单车统计
+  const bikeTotalDistance = computed(() => bikeLogs.value.reduce((s, l) => s + (l.distanceKm || 0), 0))
+  const bikeTotalSessions = computed(() => bikeLogs.value.length)
 
   async function load() {
     isLoading.value = true
@@ -81,10 +87,11 @@ export const useAerobicStore = defineStore('aerobic', () => {
 
   return {
     logs, isLoading,
-    swimLogs, stairLogs, treadmillLogs,
+    swimLogs, stairLogs, treadmillLogs, bikeLogs,
     swimTotalDistance, swimTotalSessions,
-    stairTotalFloors, stairTotalSessions,
+    stairTotalDistance, stairTotalSessions,
     treadmillTotalDistance, treadmillTotalSessions,
+    bikeTotalDistance, bikeTotalSessions,
     load, addLog, deleteLog, updateLog
   }
 })

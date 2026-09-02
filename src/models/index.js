@@ -125,7 +125,7 @@ export class BodyRecord {
   }
 }
 
-// 有氧记录（type: 'swim' 游泳 / 'stair' 爬楼机 / 'treadmill' 跑步机）
+// 有氧记录（type: 'swim' 游泳 / 'stair' 爬楼机 / 'treadmill' 跑步机 / 'bike' 动感单车）
 // 对应表 aerobic_logs
 export class AerobicLog {
   constructor({ id, type = 'swim', date, distanceM = 0, floors = 0, distanceKm = 0, durationMin, afterStrength = false, notes = '' }) {
@@ -133,8 +133,8 @@ export class AerobicLog {
     this.type = type
     this.date = date
     this.distanceM = distanceM  // 游泳：米
-    this.floors = floors        // 爬楼机：层
-    this.distanceKm = distanceKm  // 跑步机：千米
+    this.floors = floors        // 历史层数（stair 1.0.1 起改公里，仅旧数据保留）
+    this.distanceKm = distanceKm  // 爬楼机/跑步机/动感单车：千米
     this.durationMin = durationMin
     this.afterStrength = afterStrength  // 是否在力量后
     this.notes = notes

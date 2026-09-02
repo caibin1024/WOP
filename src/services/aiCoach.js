@@ -120,8 +120,9 @@ export async function buildDataUpdate() {
   if (aerobicRows.length) {
     const aerobicText = aerobicRows.map(r => {
       let label
-      if (r.type === 'stair') label = `爬楼机 ${r.floors}层`
+      if (r.type === 'stair') label = `爬楼机 ${r.distance_km}km`
       else if (r.type === 'treadmill') label = `跑步机 ${r.distance_km}km`
+      else if (r.type === 'bike') label = `动感单车 ${r.distance_km}km`
       else label = `游泳 ${r.distance_m}米`
       return `${r.date}：${label}，${r.duration_min}分钟${r.after_strength ? '，力量训练后' : ''}`
     }).join('\n')

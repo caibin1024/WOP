@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS body_records (
   notes TEXT DEFAULT ''
 );
 
--- 有氧模块统一表：type 区分 swim（distance_m 米）/ stair（floors 层）/ treadmill（distance_km 千米）
+-- 有氧模块统一表：type 区分 swim（distance_m 米）/ stair（distance_km 千米，1.0.1 起）/ treadmill（distance_km 千米）/ bike（distance_km 千米）
 CREATE TABLE IF NOT EXISTS aerobic_logs (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL DEFAULT 'swim',
@@ -204,6 +204,12 @@ export async function initDatabase() {
         await db.run('ALTER TABLE aerobic_logs ADD COLUMN distance_km REAL DEFAULT 0')
       }
 
+      // 迁移：爬楼机单位 层数→公里（1.0.1）——1公里=48层，旧 floors 换算进 distance_km。
+      // 以 distance_km=0 为守卫：只换算未迁移的旧 stair 记录，重复运行不叠加。
+      await db.run(
+        "UPDATE aerobic_logs SET distance_km = ROUND(floors / 48.0, 2) WHERE type = 'stair' AND floors > 0 AND distance_km = 0"
+      )
+
       // 迁移：AI 增量上传水位（v0.2.6）——训练日志/身体数据/有氧记录各加 ai_uploaded 列，
       // 标记哪些行已上传给 AI 会话，只传新增（老库升级时补列，默认 0=未上传）。
       for (const table of ['training_logs', 'body_records', 'aerobic_logs']) {
@@ -216,6 +222,39 @@ export async function initDatabase() {
       // 首次初始化：把预置计划写入 workout_day_exercises（表空才写入）。
       // 此后计划以表为准，支持设置页自定义。必须用本地 db 对象（重入陷阱）。
       await seedWorkoutDayExercises(db)
+
+      // 迁移：PPL 计划强化（1.0.1）——push 加哑铃侧平举，pull 加器械划船+引体向上(辅助机)，
+      // legs 加绳索卷腹+下腹卷腹机。老用户计划已落库，按 day_type+exercise_id 幂等插入；
+      // 负重动作补 exercise_defaults 推荐重量兜底（重复运行不重复插入/覆盖）。
+      const PLAN_BOOST = [
+        { dayType: 'push', exerciseId: 'dumbbell-lateral-raise', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, weight: 6 },
+        { dayType: 'pull', exerciseId: 'machine-row', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, weight: 30 },
+        { dayType: 'pull', exerciseId: 'assisted-pull-up', targetSets: 4, targetRepsMin: 8, targetRepsMax: 12, weight: 20 },
+        { dayType: 'legs', exerciseId: 'cable-crunch', targetSets: 4, targetRepsMin: 15, targetRepsMax: 15, weight: 12 },
+        { dayType: 'legs', exerciseId: 'machine-crunch-lower', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, weight: 15 }
+      ]
+      const planCols = await db.query('SELECT day_type, exercise_id FROM workout_day_exercises')
+      const existingPlanKeys = new Set((planCols.values || []).map(r => `${r.day_type}:${r.exercise_id}`))
+      for (const p of PLAN_BOOST) {
+        if (existingPlanKeys.has(`${p.dayType}:${p.exerciseId}`)) continue
+        const maxRow = await db.query(
+          'SELECT COALESCE(MAX(sort_order), -1) AS m FROM workout_day_exercises WHERE day_type = ?', [p.dayType]
+        )
+        const maxOrder = maxRow.values?.[0]?.m ?? -1
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+        await db.run(
+          `INSERT INTO workout_day_exercises (id, day_type, exercise_id, target_sets, target_reps_min, target_reps_max, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [id, p.dayType, p.exerciseId, p.targetSets, p.targetRepsMin, p.targetRepsMax, maxOrder + 1]
+        )
+        const def = await db.query('SELECT exercise_id FROM exercise_defaults WHERE exercise_id = ?', [p.exerciseId])
+        if (!(def.values || []).length) {
+          await db.run(
+            'INSERT INTO exercise_defaults (exercise_id, weight_kg, reps, seconds, target_sets, updated_at) VALUES (?, ?, NULL, NULL, ?, ?)',
+            [p.exerciseId, p.weight, p.targetSets, new Date().toISOString()]
+          )
+        }
+      }
 
       // 默认计划偏移：练三休一顺延 1 天（今天 8/11 为休息日，明天恢复 Push）。
       // 注意：此处必须用本地 db 对象，不能调模块级 run()（会重入 initDatabase）。

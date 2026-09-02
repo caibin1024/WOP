@@ -437,6 +437,39 @@ export const SEED_EXERCISES = [
     instructions: '1. 悬垂于单杠，双手与肩同宽，身体自然下垂\n2. 收核心，呼气，卷腹将双腿抬至与地面平行或更高\n3. 顶峰稍作停顿\n4. 吸气，控制下放回起始位\n5. 全程不要摆动借力',
     commonMistakes: '1. 用摆动借力\n2. 耸肩\n3. 下放太快失控\n4. 只靠髋部上抬',
     tips: '直腿困难可先做屈膝抬腿；核心收紧、控制下放是刺激腹部的关键'
+  },
+  {
+    id: 'dumbbell-lateral-raise',
+    name: '哑铃侧平举',
+    category: 'shoulder',
+    isMachine: false,
+    recommendedWeightKg: 6,
+    targetMuscle: '三角肌中束',
+    instructions: '1. 双手持哑铃于体侧，肘微屈\n2. 呼气，向两侧平举至与肩同高\n3. 顶峰稍作停顿\n4. 吸气，缓慢下放回起始位\n5. 不要耸肩借力',
+    commonMistakes: '1. 耸肩\n2. 用惯性甩起\n3. 举得过高（超过肩线）\n4. 下放太快',
+    tips: '小重量多次数更有效；肘部微屈保持张力，直立练中束，前倾略练前束'
+  },
+  {
+    id: 'assisted-pull-up',
+    name: '引体向上（辅助机）',
+    category: 'back',
+    isMachine: true,
+    recommendedWeightKg: 20,
+    targetMuscle: '背阔肌、大圆肌',
+    instructions: '1. 跪在/站在辅助引体机垫板上，双手宽握把手（略宽于肩）\n2. 呼气，背部发力将身体向上拉起，至下巴过杠\n3. 顶峰收缩背阔肌1-2秒\n4. 吸气，控制身体缓慢下放至手臂接近伸直\n5. 保持核心收紧，不要摆动借力',
+    commonMistakes: '1. 用二头猛拉、背没发力\n2. 身体前后摆动借力\n3. 半程拉一半就停\n4. 下放太快失控',
+    tips: '配重越大辅助越多、越轻松。每完成一次就考虑减一点配重，向自重引体过渡；握距宽主攻背阔宽度'
+  },
+  {
+    id: 'machine-crunch-lower',
+    name: '下腹卷腹机',
+    category: 'core',
+    isMachine: true,
+    recommendedWeightKg: 15,
+    targetMuscle: '腹直肌（下腹）',
+    instructions: '1. 坐入下腹卷腹机，固定上身，双脚踩在脚踏/膝垫上\n2. 呼气，用下腹力量带动大腿向胸部方向卷起，骨盆后倾\n3. 顶峰收紧1-2秒\n4. 吸气，控制缓慢还原至起始位\n5. 用下腹卷曲发力，不要用腿蹬或惯性甩',
+    commonMistakes: '1. 用腿蹬地借力\n2. 只抬腿不卷骨盆\n3. 还原过快，下腹失去张力\n4. 幅度太小',
+    tips: '与卷腹机（上腹）互补，专攻下腹。重点是骨盆后倾的"卷"而非抬腿，动作慢、幅度完整'
   }
 ]
 
@@ -453,7 +486,8 @@ export const SEED_WORKOUT_PLAN = [
       { exerciseId: 'machine-chest-press', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 90, sortOrder: 2 },
       { exerciseId: 'cable-lateral-raise', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 3 },
       { exerciseId: 'machine-fly', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 4 },
-      { exerciseId: 'cable-triceps-pushdown', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 5 }
+      { exerciseId: 'cable-triceps-pushdown', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 5 },
+      { exerciseId: 'dumbbell-lateral-raise', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, restSeconds: 60, sortOrder: 6 }
     ]
   },
   {
@@ -466,7 +500,9 @@ export const SEED_WORKOUT_PLAN = [
       { exerciseId: 'close-lat-pulldown', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 90, sortOrder: 2 },
       { exerciseId: 'seated-cable-row', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 90, sortOrder: 3 },
       { exerciseId: 'face-pull', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 4 },
-      { exerciseId: 'dumbbell-curl', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 5 }
+      { exerciseId: 'dumbbell-curl', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 60, sortOrder: 5 },
+      { exerciseId: 'machine-row', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, restSeconds: 90, sortOrder: 6 },
+      { exerciseId: 'assisted-pull-up', targetSets: 4, targetRepsMin: 8, targetRepsMax: 12, restSeconds: 90, sortOrder: 7 }
     ]
   },
   {
@@ -482,7 +518,9 @@ export const SEED_WORKOUT_PLAN = [
       { exerciseId: 'seated-calf-raise', targetSets: 4, targetRepsMin: 15, targetRepsMax: 15, restSeconds: 60, sortOrder: 5 },
       { exerciseId: 'crunch-machine', targetSets: 4, targetRepsMin: 15, targetRepsMax: 15, restSeconds: 45, sortOrder: 6 },
       { exerciseId: 'machine-leg-raise', targetSets: 3, targetRepsMin: 12, targetRepsMax: 15, restSeconds: 45, sortOrder: 7 },
-      { exerciseId: 'seated-torso-rotation', targetSets: 3, targetRepsMin: 15, targetRepsMax: 15, restSeconds: 45, sortOrder: 8 }
+      { exerciseId: 'seated-torso-rotation', targetSets: 3, targetRepsMin: 15, targetRepsMax: 15, restSeconds: 45, sortOrder: 8 },
+      { exerciseId: 'cable-crunch', targetSets: 4, targetRepsMin: 15, targetRepsMax: 15, restSeconds: 45, sortOrder: 9 },
+      { exerciseId: 'machine-crunch-lower', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, restSeconds: 45, sortOrder: 10 }
     ]
   }
 ]

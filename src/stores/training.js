@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { Capacitor } from '@capacitor/core'
+import { App } from '@capacitor/app'
 import { initDatabase, query, run, genId, todayStr } from '../database'
 import {
   getTodayDayType as seedGetTodayDayType,
@@ -23,6 +25,8 @@ export const useTrainingStore = defineStore('training', () => {
   const planByDay = ref({ push: [], pull: [], legs: [] }) // 计划动作配置（workout_day_exercises 表，可自定义）
   const isLoading = ref(false)
   const isSeeded = ref(false)
+  // 上次刷新今日状态的日期（前台恢复/跨天轮换用；refreshToday 每次写入今天）
+  const lastRefreshedDate = ref('')
 
   const allExercises = ref([...SEED_EXERCISES])
 
@@ -54,6 +58,8 @@ export const useTrainingStore = defineStore('training', () => {
       } finally {
         isLoading.value = false
       }
+      // 挂前台/跨天刷新（refreshToday 已写入 lastRefreshedDate，首帧不会误触发）
+      registerDaySync()
     })()
     return initPromise
   }
@@ -216,12 +222,41 @@ export const useTrainingStore = defineStore('training', () => {
     const dayPlan = planByDay.value[todayDayType.value] || []
     todayExercises.value = dayPlan.map((w, i) => ({ ...w, sortOrder: i }))
     await loadTodayLogs()
+    lastRefreshedDate.value = todayStr()
   }
 
   /** 计划操作后统一刷新：重读计划 + 今日页。写库失败则抛错，由调用方处理 */
   async function reloadPlanAndToday() {
     await loadPlan()
     await refreshToday()
+  }
+
+  /**
+   * 回前台/跨天时把今日状态同步到当前日期：
+   * 仅当日期真的变化才重拉计划 + 刷新今日 + 重载历史（幂等，同一天重复触发直接跳过）。
+   * 解决：进程常驻（Android 后台恢复/跨过午夜）时 todayExercises 不随新训练日轮换的 bug。
+   */
+  async function syncToToday() {
+    if (!lastRefreshedDate.value) return // init 尚未完成（首帧），跳过避免与 init 并发
+    if (lastRefreshedDate.value === todayStr()) return // 日期未变，一切已是最新
+    try {
+      await loadPlan()
+      await refreshToday()
+      await loadHistory()
+    } catch (e) { /* 前台同步失败不阻断（用当前缓存） */ }
+  }
+
+  // 前台恢复监听是否已注册（init 只跑一次，但防重入保证幂等）
+  let daySyncRegistered = false
+  function registerDaySync() {
+    if (daySyncRegistered) return
+    daySyncRegistered = true
+    // 双保险：App 插件 resume 事件 + visibilitychange（原生 WebView 前后台切换可靠触发），照抄 theme.js
+    const onVisible = () => { if (document.visibilityState === 'visible') syncToToday() }
+    document.addEventListener('visibilitychange', onVisible)
+    if (Capacitor.isNativePlatform()) {
+      App.addListener('resume', onVisible).catch(() => {})
+    }
   }
 
   /**

@@ -5,11 +5,12 @@
       <div class="subtitle">有氧恢复 · 每天打卡</div>
     </div>
 
-    <!-- 子模块页签：游泳 | 爬楼机 | 跑步机 -->
+    <!-- 子模块页签：游泳 | 爬楼机 | 跑步机 | 动感单车 -->
     <div class="tab-bar">
       <button class="tab-btn" :class="{ active: activeTab === 'swim' }" @click="activeTab = 'swim'">游泳</button>
       <button class="tab-btn" :class="{ active: activeTab === 'stair' }" @click="activeTab = 'stair'">爬楼机</button>
       <button class="tab-btn" :class="{ active: activeTab === 'treadmill' }" @click="activeTab = 'treadmill'">跑步机</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'bike' }" @click="activeTab = 'bike'">动感单车</button>
     </div>
 
     <!-- ===== 游泳子模块 ===== -->
@@ -65,8 +66,8 @@
     <template v-else-if="activeTab === 'stair'">
       <div class="stats-row">
         <div class="stat-card card">
-          <div class="stat-value num">{{ aerobic.stairTotalFloors }}<span class="stat-unit">层</span></div>
-          <div class="stat-label">累计层数</div>
+          <div class="stat-value num">{{ aerobic.stairTotalDistance.toFixed(1) }}<span class="stat-unit">km</span></div>
+          <div class="stat-label">累计距离</div>
         </div>
         <div class="stat-card card">
           <div class="stat-value num">{{ aerobic.stairTotalSessions }}<span class="stat-unit">次</span></div>
@@ -85,9 +86,9 @@
           <input type="date" v-model="stairForm.date" class="form-input">
         </div>
         <div class="form-row">
-          <label>层数</label>
-          <input type="number" inputmode="numeric" v-model.number="stairForm.floors"
-                 placeholder="如 50" class="form-input">
+          <label>距离(km)</label>
+          <input type="number" inputmode="decimal" v-model.number="stairForm.distanceKm"
+                 placeholder="如 2.5" class="form-input">
         </div>
         <div class="form-row">
           <label>时长(分钟)</label>
@@ -101,7 +102,7 @@
             <span class="switch-slider"></span>
           </label>
         </div>
-        <button class="btn btn-primary form-btn" @click="save" :disabled="!stairForm.floors">保存记录</button>
+        <button class="btn btn-primary form-btn" @click="save" :disabled="!stairForm.distanceKm">保存记录</button>
       </div>
 
       <div class="card tip-card">
@@ -111,7 +112,7 @@
     </template>
 
     <!-- ===== 跑步机子模块 ===== -->
-    <template v-else>
+    <template v-else-if="activeTab === 'treadmill'">
       <div class="stats-row">
         <div class="stat-card card">
           <div class="stat-value num">{{ aerobic.treadmillTotalDistance.toFixed(1) }}<span class="stat-unit">km</span></div>
@@ -159,7 +160,56 @@
       </div>
     </template>
 
-    <!-- ===== 统一有氧记录列表（三种类型合并，行内标记类型） ===== -->
+    <!-- ===== 动感单车子模块 ===== -->
+    <template v-else>
+      <div class="stats-row">
+        <div class="stat-card card">
+          <div class="stat-value num">{{ aerobic.bikeTotalDistance.toFixed(1) }}<span class="stat-unit">km</span></div>
+          <div class="stat-label">累计距离</div>
+        </div>
+        <div class="stat-card card">
+          <div class="stat-value num">{{ aerobic.bikeTotalSessions }}<span class="stat-unit">次</span></div>
+          <div class="stat-label">骑行次数</div>
+        </div>
+        <div class="stat-card card">
+          <div class="stat-value num">{{ avgBikeDuration }}<span class="stat-unit">分/次</span></div>
+          <div class="stat-label">平均时长</div>
+        </div>
+      </div>
+
+      <div class="card form-card">
+        <div class="card-title">记录动感单车</div>
+        <div class="form-row">
+          <label>日期</label>
+          <input type="date" v-model="bikeForm.date" class="form-input">
+        </div>
+        <div class="form-row">
+          <label>距离(km)</label>
+          <input type="number" inputmode="decimal" v-model.number="bikeForm.distanceKm"
+                 placeholder="如 10" class="form-input">
+        </div>
+        <div class="form-row">
+          <label>时长(分钟)</label>
+          <input type="number" inputmode="numeric" v-model.number="bikeForm.durationMin"
+                 placeholder="如 40" class="form-input">
+        </div>
+        <div class="form-row">
+          <label>力量后练？</label>
+          <label class="switch">
+            <input type="checkbox" v-model="bikeForm.afterStrength">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+        <button class="btn btn-primary form-btn" @click="save" :disabled="!bikeForm.distanceKm">保存记录</button>
+      </div>
+
+      <div class="card tip-card">
+        <div class="card-title">今日建议</div>
+        <div class="tip-text">{{ bikeTip }}</div>
+      </div>
+    </template>
+
+    <!-- ===== 统一有氧记录列表（四种类型合并，行内标记类型） ===== -->
     <div class="card">
       <div class="card-title">有氧记录</div>
       <div v-for="l in aerobic.logs" :key="l.id" class="aerobic-row">
@@ -187,7 +237,7 @@ import AppIcon from '../components/AppIcon.vue'
 
 const aerobic = useAerobicStore()
 
-// 当前子模块页签：'swim' 游泳 | 'stair' 爬楼机 | 'treadmill' 跑步机
+// 当前子模块页签：'swim' 游泳 | 'stair' 爬楼机 | 'treadmill' 跑步机 | 'bike' 动感单车
 const activeTab = ref('swim')
 
 const swimForm = reactive({
@@ -199,12 +249,19 @@ const swimForm = reactive({
 
 const stairForm = reactive({
   date: todayLocal(),
-  floors: null,
+  distanceKm: null,
   durationMin: null,
   afterStrength: false
 })
 
 const treadmillForm = reactive({
+  date: todayLocal(),
+  distanceKm: null,
+  durationMin: null,
+  afterStrength: false
+})
+
+const bikeForm = reactive({
   date: todayLocal(),
   distanceKm: null,
   durationMin: null,
@@ -236,13 +293,22 @@ const avgTreadmillDuration = computed(() => {
   return Math.round((totalMin / n) * 10) / 10
 })
 
+// 动感单车：平均时长（分/次）
+const avgBikeDuration = computed(() => {
+  const totalMin = aerobic.bikeLogs.reduce((s, l) => s + (l.durationMin || 0), 0)
+  const n = aerobic.bikeTotalSessions
+  if (n === 0) return '--'
+  return Math.round((totalMin / n) * 10) / 10
+})
+
 // 统一记录列表：类型标签与主指标
 function typeLabel(type) {
-  return { swim: '游泳', stair: '爬楼机', treadmill: '跑步机' }[type] || '有氧'
+  return { swim: '游泳', stair: '爬楼机', treadmill: '跑步机', bike: '动感单车' }[type] || '有氧'
 }
 function mainMetric(l) {
-  if (l.type === 'stair') return `${l.floors} 层`
+  if (l.type === 'stair') return `${l.distanceKm} km`
   if (l.type === 'treadmill') return `${l.distanceKm} km`
+  if (l.type === 'bike') return `${l.distanceKm} km`
   return `${(l.distanceM / 1000).toFixed(2)} km`
 }
 
@@ -270,6 +336,14 @@ const treadmillTip = computed(() => {
   return '今天是休息/有氧日，可快走或慢跑 30-40 分钟，心率保持在舒适区间。'
 })
 
+const bikeTip = computed(() => {
+  const day = new Date().getDay()
+  if (day === 0 || day === 3 || day === 6) {
+    return '今天是力量训练日，动感单车建议中低强度 25-35 分钟，保持稳定踏频。'
+  }
+  return '今天是休息/有氧日，可骑 30-45 分钟，档位适中，保持呼吸节奏。'
+})
+
 function todayLocal() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -295,19 +369,19 @@ async function save() {
     swimForm.durationMin = null
     swimForm.afterStrength = false
   } else if (activeTab.value === 'stair') {
-    if (!stairForm.floors) return
+    if (!stairForm.distanceKm) return
     await aerobic.addLog({
       type: 'stair',
       date: stairForm.date || todayLocal(),
-      floors: Number(stairForm.floors),
+      distanceKm: Number(stairForm.distanceKm),
       durationMin: Number(stairForm.durationMin) || 30,
       afterStrength: stairForm.afterStrength,
       notes: ''
     })
-    stairForm.floors = null
+    stairForm.distanceKm = null
     stairForm.durationMin = null
     stairForm.afterStrength = false
-  } else {
+  } else if (activeTab.value === 'treadmill') {
     if (!treadmillForm.distanceKm) return
     await aerobic.addLog({
       type: 'treadmill',
@@ -320,6 +394,19 @@ async function save() {
     treadmillForm.distanceKm = null
     treadmillForm.durationMin = null
     treadmillForm.afterStrength = false
+  } else {
+    if (!bikeForm.distanceKm) return
+    await aerobic.addLog({
+      type: 'bike',
+      date: bikeForm.date || todayLocal(),
+      distanceKm: Number(bikeForm.distanceKm),
+      durationMin: Number(bikeForm.durationMin) || 30,
+      afterStrength: bikeForm.afterStrength,
+      notes: ''
+    })
+    bikeForm.distanceKm = null
+    bikeForm.durationMin = null
+    bikeForm.afterStrength = false
   }
   alert('已保存')
 }
@@ -499,6 +586,10 @@ onMounted(() => {
 .aerobic-type.type-treadmill {
   background: rgba(167, 139, 250, 0.16);
   color: var(--type-legs);
+}
+.aerobic-type.type-bike {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--type-push);
 }
 .del-btn {
   margin-left: auto;

@@ -380,6 +380,19 @@ watch(setInputs, () => {
   }, 300)
 }, { deep: true })
 
+// 跨天/前台恢复：今日动作列表已轮换（store.syncToToday 触发）→ 重建输入骨架。
+// 丢弃旧日的输入状态，预填新日计划（上次训练 > 配置 > 默认）。
+// 首次挂载由 onMounted 的 initSetInputs 处理（draftReady 尚为 false），此处不重复。
+watch(
+  () => training.todayExercises.map(w => w.exerciseId).join(',') + '|' + training.todayDayType,
+  async () => {
+    if (!draftReady.value) return
+    for (const k of Object.keys(setInputs)) delete setInputs[k]
+    draftReady.value = false // 重建期间禁止防抖落盘，避免把旧输入写进新一天的临时库
+    await initSetInputs()
+  }
+)
+
 onMounted(async () => {
   await training.init()
   await initSetInputs()
