@@ -46,13 +46,13 @@
     </div>
 
     <!-- 体重趋势图 -->
-    <div class="card">
+    <div class="card section-card">
       <div class="card-title">体重趋势</div>
       <ProgressChart :data="chartData" unit="kg" />
     </div>
 
     <!-- 历史记录列表 -->
-    <div class="card">
+    <div class="card section-card">
       <div class="card-title">历史记录</div>
       <div v-for="r in body.records" :key="r.id" class="body-record-row">
         <span>{{ formatDate(r.date) }}</span>
@@ -201,6 +201,9 @@ onMounted(() => {
   margin-top: 4px;
 }
 .form-card {
+  margin: 0 16px 12px;
+}
+.section-card {
   margin: 0 16px 12px;
 }
 .form-row {

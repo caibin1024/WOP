@@ -210,7 +210,7 @@
     </template>
 
     <!-- ===== 统一有氧记录列表（四种类型合并，行内标记类型） ===== -->
-    <div class="card">
+    <div class="card section-card">
       <div class="card-title">有氧记录</div>
       <div v-for="l in aerobic.logs" :key="l.id" class="aerobic-row">
         <span class="aerobic-type" :class="'type-' + l.type">{{ typeLabel(l.type) }}</span>
@@ -538,6 +538,9 @@ onMounted(() => {
 .tip-card {
   margin: 0 16px 12px;
   border-color: rgba(249, 115, 22, 0.2);
+}
+.section-card {
+  margin: 0 16px 12px;
 }
 .tip-text {
   font-size: 13px;

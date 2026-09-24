@@ -225,35 +225,41 @@ export async function initDatabase() {
 
       // 迁移：PPL 计划强化（1.0.1）——push 加哑铃侧平举，pull 加器械划船+引体向上(辅助机)，
       // legs 加绳索卷腹+下腹卷腹机。老用户计划已落库，按 day_type+exercise_id 幂等插入；
-      // 负重动作补 exercise_defaults 推荐重量兜底（重复运行不重复插入/覆盖）。
-      const PLAN_BOOST = [
-        { dayType: 'push', exerciseId: 'dumbbell-lateral-raise', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, weight: 6 },
-        { dayType: 'pull', exerciseId: 'machine-row', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, weight: 30 },
-        { dayType: 'pull', exerciseId: 'assisted-pull-up', targetSets: 4, targetRepsMin: 8, targetRepsMax: 12, weight: 20 },
-        { dayType: 'legs', exerciseId: 'cable-crunch', targetSets: 4, targetRepsMin: 15, targetRepsMax: 15, weight: 12 },
-        { dayType: 'legs', exerciseId: 'machine-crunch-lower', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, weight: 15 }
-      ]
-      const planCols = await db.query('SELECT day_type, exercise_id FROM workout_day_exercises')
-      const existingPlanKeys = new Set((planCols.values || []).map(r => `${r.day_type}:${r.exercise_id}`))
-      for (const p of PLAN_BOOST) {
-        if (existingPlanKeys.has(`${p.dayType}:${p.exerciseId}`)) continue
-        const maxRow = await db.query(
-          'SELECT COALESCE(MAX(sort_order), -1) AS m FROM workout_day_exercises WHERE day_type = ?', [p.dayType]
-        )
-        const maxOrder = maxRow.values?.[0]?.m ?? -1
-        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-        await db.run(
-          `INSERT INTO workout_day_exercises (id, day_type, exercise_id, target_sets, target_reps_min, target_reps_max, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [id, p.dayType, p.exerciseId, p.targetSets, p.targetRepsMin, p.targetRepsMax, maxOrder + 1]
-        )
-        const def = await db.query('SELECT exercise_id FROM exercise_defaults WHERE exercise_id = ?', [p.exerciseId])
-        if (!(def.values || []).length) {
-          await db.run(
-            'INSERT INTO exercise_defaults (exercise_id, weight_kg, reps, seconds, target_sets, updated_at) VALUES (?, ?, NULL, NULL, ?, ?)',
-            [p.exerciseId, p.weight, p.targetSets, new Date().toISOString()]
+      // 负重动作补 exercise_defaults 推荐重量兜底。
+      // 必须用 app_meta 标记只跑一次：若靠"存在性检查"判断，用户主动删除这些动作后，
+      // 下次启动会误判为缺失并补回，导致"删除的动作又出现"的 bug。
+      const boostDone = await db.query("SELECT value FROM app_meta WHERE key = 'migration_plan_boost_v1'", [])
+      if (!(boostDone.values || []).length) {
+        const PLAN_BOOST = [
+          { dayType: 'push', exerciseId: 'dumbbell-lateral-raise', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, weight: 6 },
+          { dayType: 'pull', exerciseId: 'machine-row', targetSets: 4, targetRepsMin: 12, targetRepsMax: 12, weight: 30 },
+          { dayType: 'pull', exerciseId: 'assisted-pull-up', targetSets: 4, targetRepsMin: 8, targetRepsMax: 12, weight: 20 },
+          { dayType: 'legs', exerciseId: 'cable-crunch', targetSets: 4, targetRepsMin: 15, targetRepsMax: 15, weight: 12 },
+          { dayType: 'legs', exerciseId: 'machine-crunch-lower', targetSets: 4, targetRepsMin: 12, targetRepsMax: 15, weight: 15 }
+        ]
+        const planCols = await db.query('SELECT day_type, exercise_id FROM workout_day_exercises')
+        const existingPlanKeys = new Set((planCols.values || []).map(r => `${r.day_type}:${r.exercise_id}`))
+        for (const p of PLAN_BOOST) {
+          if (existingPlanKeys.has(`${p.dayType}:${p.exerciseId}`)) continue
+          const maxRow = await db.query(
+            'SELECT COALESCE(MAX(sort_order), -1) AS m FROM workout_day_exercises WHERE day_type = ?', [p.dayType]
           )
+          const maxOrder = maxRow.values?.[0]?.m ?? -1
+          const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+          await db.run(
+            `INSERT INTO workout_day_exercises (id, day_type, exercise_id, target_sets, target_reps_min, target_reps_max, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [id, p.dayType, p.exerciseId, p.targetSets, p.targetRepsMin, p.targetRepsMax, maxOrder + 1]
+          )
+          const def = await db.query('SELECT exercise_id FROM exercise_defaults WHERE exercise_id = ?', [p.exerciseId])
+          if (!(def.values || []).length) {
+            await db.run(
+              'INSERT INTO exercise_defaults (exercise_id, weight_kg, reps, seconds, target_sets, updated_at) VALUES (?, ?, NULL, NULL, ?, ?)',
+              [p.exerciseId, p.weight, p.targetSets, new Date().toISOString()]
+            )
+          }
         }
+        await db.run("INSERT INTO app_meta (key, value) VALUES ('migration_plan_boost_v1', '1')", [])
       }
 
       // 默认计划偏移：练三休一顺延 1 天（今天 8/11 为休息日，明天恢复 Push）。
@@ -304,6 +310,40 @@ export async function run(sql, values = []) {
   const db = await initDatabase()
   const res = await db.run(sql, values)
   return res.changes || 0
+}
+
+/**
+ * 事务内执行：不自行开事务，交由外层 withTransaction 提交/回滚。
+ * 必须配合 withTransaction 使用；单独调用等同于普通 run（自动提交）。
+ * 为什么不用 run：插件原生端 run(transaction=true) 自己会 begin/commit，且 finally 里
+ * 只要事务仍活跃就无条件 rollback——嵌套在外层事务里会把整个外层事务回滚掉。
+ */
+export async function runInTransaction(sql, values = []) {
+  const db = await initDatabase()
+  const res = await db.run(sql, values, false)
+  return res.changes || 0
+}
+
+/**
+ * 把 fn 内的所有写操作包成一个原子事务：全部成功才提交，任一失败整体回滚。
+ * fn 内部请用 runInTransaction（不是 run，见其注释）。
+ * @param {() => Promise<any>} fn 事务体
+ * @returns {Promise<any>} fn 的返回值
+ */
+export async function withTransaction(fn) {
+  const db = await initDatabase()
+  await db.beginTransaction()
+  try {
+    const result = await fn()
+    await db.commitTransaction()
+    return result
+  } catch (e) {
+    // 回滚本身失败不掩盖原始错误（原始错误信息对用户更有价值）
+    try {
+      await db.rollbackTransaction()
+    } catch (e2) { /* 忽略 */ }
+    throw e
+  }
 }
 
 /**

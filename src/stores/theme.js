@@ -40,7 +40,6 @@ export const useThemeStore = defineStore('theme', () => {
   const effective = computed(() => resolveEffective(mode.value))
 
   let mediaQuery = null
-  let resumeListener = null
   let _inited = false
 
   /**
@@ -95,9 +94,7 @@ export const useThemeStore = defineStore('theme', () => {
     document.addEventListener('visibilitychange', onVisible)
     if (Capacitor.isNativePlatform()) {
       try {
-        App.addListener('resume', onVisible)
-          .then(l => { resumeListener = l })
-          .catch(() => {})
+        App.addListener('resume', onVisible).catch(() => {})
       } catch (e) { /* App 插件不可用则忽略 */ }
     }
   }

@@ -148,18 +148,28 @@
           <AppIcon name="sparkles" :size="20" class="row-icon accent" />
           <div class="row-text">
             <span class="row-title">AI 咨询</span>
-            <span class="row-sub">{{ ai.hasApiKey ? 'DeepSeek Key 已配置' : '未配置 API Key' }}</span>
+            <span class="row-sub">{{ ai.hasApiKey ? `${ai.providerLabel} Key 已配置` : '未配置 API Key' }}</span>
           </div>
           <AppIcon name="chevron-down" :size="18" class="row-chevron" :class="{ open: openGroups.ai }" />
         </button>
         <div v-show="openGroups.ai" class="setting-body">
+          <div class="theme-seg" role="radiogroup" aria-label="AI 服务商">
+            <button
+              v-for="opt in PROVIDER_OPTIONS"
+              :key="opt.value"
+              class="theme-seg-btn"
+              :class="{ current: ai.provider === opt.value }"
+              :aria-pressed="ai.provider === opt.value"
+              @click="switchProvider(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
           <div class="ai-key-row">
             <input
               :type="showKey ? 'text' : 'password'"
               class="profile-input ai-key-input"
               :class="{ 'has-key': ai.hasApiKey }"
               v-model="keyInput"
-              placeholder="sk-..."
+              :placeholder="providerHint"
               autocomplete="off"
             >
             <button class="plan-act-btn" @click="showKey = !showKey">
@@ -178,10 +188,15 @@
           </div>
           <div v-if="keyMsg" class="settings-tip" :class="{ error: keyMsg[0] === '❌' }">{{ keyMsg }}</div>
           <p class="settings-note">
-            在 DeepSeek 开放平台（platform.deepseek.com）注册后创建 API Key，按 token 计费。
+            <template v-if="ai.provider === 'deepseek'">
+              在 DeepSeek 开放平台（platform.deepseek.com）注册后创建 API Key，按 token 计费。
+            </template>
+            <template v-else>
+              在小米 Token Plan 平台创建 API Key（tp- 开头），接口配置已自动内置。
+            </template>
             Key 仅保存在本机，不随导出数据或安装包分发。
-            点「新建会话」会清空旧会话，并把你的个人资料与训练节奏发送给 DeepSeek（消耗少量 token，顺带做连接测试）；
-            此后每次咨询前，新增的训练 / 身体 / 有氧数据会自动增量上传，只发往 DeepSeek。
+            点「新建会话」会清空旧会话，并把你的个人资料与训练节奏发送给 {{ ai.providerLabel }}（消耗少量 token，顺带做连接测试）；
+            此后每次咨询前，新增的训练 / 身体 / 有氧数据会自动增量上传，只发往 {{ ai.providerLabel }}。
           </p>
         </div>
       </div>
@@ -192,7 +207,7 @@
           <AppIcon name="export" :size="20" class="row-icon" />
           <div class="row-text">
             <span class="row-title">数据管理</span>
-            <span class="row-sub">导出训练记录 · 清空数据</span>
+            <span class="row-sub">导入 / 导出 / 清空数据</span>
           </div>
           <AppIcon name="chevron-down" :size="18" class="row-chevron" :class="{ open: openGroups.data }" />
         </button>
@@ -202,14 +217,19 @@
               <AppIcon name="export" :size="18" />
               <span>{{ exporting ? '导出中...' : '导出全部数据(JSON)' }}</span>
             </button>
+            <button class="btn" @click="triggerImport" :disabled="importing">
+              <AppIcon name="exchange" :size="18" />
+              <span>{{ importing ? '导入中...' : '导入数据(JSON)' }}</span>
+            </button>
             <button class="btn btn-danger" @click="confirmClear">
               <AppIcon name="trash" :size="18" />
               <span>清空全部数据</span>
             </button>
+            <input ref="fileInput" type="file" accept=".json,application/json,text/json" style="display:none" @change="onFileChosen">
           </div>
           <div class="settings-tip" v-if="exportResult">{{ exportResult }}</div>
           <p class="settings-note">
-            导出 JSON 用于备份与迁移参考（包含你自定义的训练计划，不包含 AI Key）。
+            导出 JSON 用于备份与迁移；导入会覆盖当前训练 / 身体 / 有氧数据并恢复自定义计划（不包含 AI Key 与服务商选择）。
           </p>
         </div>
       </div>
@@ -278,7 +298,7 @@
         <div v-show="openGroups.about" class="setting-body">
           <p class="settings-note">
             当前版本 WOP v{{ APP_VERSION }}。所有训练数据保存在本机，完全离线可用；
-            AI 咨询需联网调用 DeepSeek 接口。
+            AI 咨询需联网调用所选 AI 服务商（DeepSeek / 小米 Token Plan）接口。
           </p>
         </div>
       </div>
@@ -309,6 +329,7 @@ import { useBodyStore } from '../stores/body'
 import { useAiStore } from '../stores/ai'
 import { useThemeStore } from '../stores/theme'
 import { exportAllData } from '../services/exportData'
+import { importAllData } from '../services/importData'
 import { PLAN_LABELS } from '../database/seed'
 import { initDatabase, run } from '../database'
 import AppIcon from '../components/AppIcon.vue'
@@ -338,6 +359,8 @@ const themeSub = computed(() => {
 
 const exporting = ref(false)
 const exportResult = ref('')
+const importing = ref(false)
+const fileInput = ref(null)
 const savingProfile = ref(false)
 const profileSaved = ref('')
 
@@ -529,12 +552,30 @@ async function removeSlot(dayType, slot) {
   }
 }
 
-// ---- AI Key ----
+// ---- AI 服务商 + Key ----
+// 分段选项与占位符用本地映射（镜像 THEME_OPTIONS 范式）：视图只该拿 label，
+// 不 import aiCoach 的配置表，防止 URL/模型等"自动写好"的配置渗进 UI 层
+const PROVIDER_OPTIONS = [
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'mimo', label: '小米 Token Plan' }
+]
+const PROVIDER_HINT = { deepseek: 'sk-...', mimo: 'tp-...' }
+const providerHint = computed(() => PROVIDER_HINT[ai.provider] || 'sk-...')
+
 const keyInput = ref('')
 const showKey = ref(false)
 const savingKey = ref(false)
 const newSessionting = ref(false)
 const keyMsg = ref('')
+
+async function switchProvider(p) {
+  await ai.setProvider(p)
+  // keyInput 是本地草稿，必须跟着 store 重同步——不同步会把 A 家的 key 显示进 B 家输入框，
+  // 用户一点保存就串键。副作用是丢掉 A 家未保存的草稿：正确性 > 草稿保留
+  keyInput.value = ai.apiKey
+  keyMsg.value = ''        // 清掉上一家的 ✅/❌ 提示
+  showKey.value = false    // 重置密码态，防两把 key 互相窥见
+}
 
 async function saveKey() {
   savingKey.value = true
@@ -583,6 +624,53 @@ async function doExport() {
   }
 }
 
+function triggerImport() {
+  fileInput.value?.click()
+}
+
+async function onFileChosen(event) {
+  const file = event.target.files && event.target.files[0]
+  event.target.value = '' // 允许重复选择同一文件
+  if (!file) return
+  if (!confirm('导入会覆盖当前的全部训练、身体与有氧数据（含自定义计划）。确定继续吗？')) return
+  importing.value = true
+  try {
+    const text = await readFileAsText(file)
+    const counts = await importAllData(text)
+    // 刷新各 store，让页面立即反映导入数据
+    await training.loadPlan()
+    await training.refreshToday()
+    await training.loadHistory()
+    await profile.load()
+    await body.load()
+    // 重置设置页编辑/默认值缓存，重新同步到新计划
+    Object.keys(edits).forEach(k => delete edits[k])
+    Object.keys(defaults).forEach(k => delete defaults[k])
+    syncEdits()
+    syncDefaults()
+    const parts = []
+    if (counts.training) parts.push(`训练 ${counts.training} 组`)
+    if (counts.body) parts.push(`体重 ${counts.body} 条`)
+    if (counts.aerobic) parts.push(`有氧 ${counts.aerobic} 条`)
+    if (counts.plan) parts.push(`计划 ${counts.plan} 个动作`)
+    alert('✅ 导入成功' + (parts.length ? '：' + parts.join('、') : ''))
+  } catch (e) {
+    console.error(e)
+    alert('导入失败：' + (e?.message || e))
+  } finally {
+    importing.value = false
+  }
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.readAsText(file, 'utf-8')
+  })
+}
+
 async function confirmClear() {
   if (!confirm('确定清空所有训练记录、身体数据和有氧记录吗？此操作不可恢复！')) return
   if (!confirm('再次确认：真的要清空全部数据吗？')) return
@@ -592,6 +680,8 @@ async function confirmClear() {
   await run('DELETE FROM aerobic_logs')
   await run('DELETE FROM ai_messages') // 清 AI 会话，避免 AI 引用已删除数据的记忆
   await run('DELETE FROM ai_consult_records') // 清 AI 咨询记录列表
+  // 长期记忆也是"已删除数据"的结论来源，必须跟会话一起清；否则下次提问会把旧记忆原样带回来
+  await run("DELETE FROM app_meta WHERE key = 'ai_memory'", [])
   await training.loadHistory()
   await ai.load() // 刷新会话为空 → 面板回到「尚未开始会话」
   alert('已清空全部数据')

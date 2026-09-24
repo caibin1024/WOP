@@ -69,5 +69,5 @@ export const useBodyStore = defineStore('body', () => {
     await load()
   }
 
-  return { records, latest, latestBmi, isLoading, load, saveRecord, deleteRecord, calcBmi }
+  return { records, latest, latestBmi, isLoading, load, saveRecord, deleteRecord }
 })

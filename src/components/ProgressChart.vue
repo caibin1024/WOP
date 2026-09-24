@@ -1,5 +1,5 @@
 <template>
-  <div class="chart-wrap" v-if="points.length > 1">
+  <div class="chart-wrap" v-if="pts.length > 1">
     <svg :viewBox="`0 0 ${W} ${H}`" class="chart-svg">
       <!-- 网格线 -->
       <line v-for="gy in gridY" :key="'gy' + gy" :x1="PAD_L" :y1="gy" :x2="W - PAD_R" :y2="gy" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3 3" />

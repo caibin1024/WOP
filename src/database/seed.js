@@ -470,8 +470,40 @@ export const SEED_EXERCISES = [
     instructions: '1. 坐入下腹卷腹机，固定上身，双脚踩在脚踏/膝垫上\n2. 呼气，用下腹力量带动大腿向胸部方向卷起，骨盆后倾\n3. 顶峰收紧1-2秒\n4. 吸气，控制缓慢还原至起始位\n5. 用下腹卷曲发力，不要用腿蹬或惯性甩',
     commonMistakes: '1. 用腿蹬地借力\n2. 只抬腿不卷骨盆\n3. 还原过快，下腹失去张力\n4. 幅度太小',
     tips: '与卷腹机（上腹）互补，专攻下腹。重点是骨盆后倾的"卷"而非抬腿，动作慢、幅度完整'
+  },
+
+  // ============ 新增器械：多功能侧平举机（向内夹胸 / 向外侧平举 两用）============
+  {
+    id: 'machine-chest-fly',
+    recommendedWeightKg: 12, // 配重（建议起始）
+    name: '器械夹胸（侧平举机）',
+    category: 'chest',
+    isMachine: true,
+    targetMuscle: '胸大肌中缝',
+    instructions: '1. 调整座椅，双臂张开与肩同高，手握把手，手肘微曲固定\n2. 挺胸收腹，肩胛骨下沉，核心收紧\n3. 呼气，胸肌发力将双臂由两侧向身前合拢\n4. 顶峰收缩1秒，想象两个肘尖要在胸前碰在一起\n5. 吸气，控制缓慢张开还原至胸肌有拉伸感，全程手肘角度不变',
+    commonMistakes: '1. 用手臂硬掰代替胸肌发力\n2. 张开太快，离心失去控制\n3. 含胸驼背，肩胛骨翘起\n4. 手肘角度变化，做成推举',
+    tips: '这是"夹"不是"推"，顶峰停顿比重量重要。器械轨迹固定、重心稳，比蝴蝶机更容易找到胸肌中缝的发力感，重量宁轻勿重'
+  },
+  {
+    id: 'machine-lateral-raise',
+    recommendedWeightKg: 8, // 配重（建议起始）
+    name: '器械侧平举（侧平举机）',
+    category: 'shoulder',
+    isMachine: true,
+    targetMuscle: '三角肌中束',
+    instructions: '1. 坐正，调整座椅让双臂自然贴住两侧臂垫，手肘约90度\n2. 肩胛下沉，核心收紧，目视前方\n3. 呼气，三角肌发力将双臂向两侧抬至与肩同高\n4. 顶峰稍作停顿1秒\n5. 吸气，控制缓慢下放，配重片不完全落底（保持张力）',
+    commonMistakes: '1. 耸肩，斜方肌代偿\n2. 抬得过高超过肩线\n3. 用惯性甩起，下放失控\n4. 身体晃动借力、手肘角度乱变',
+    tips: '器械轨迹固定，是中束最孤立的练法之一。慢起慢放比大重量重要；和哑铃侧平举、绳索侧平举互补，可以轮换着用'
   }
 ]
+
+/**
+ * 计时动作 id 集合（如平板支撑）：这类动作 training_logs 的 reps 列实际存秒数。
+ * 导出/导入/AI 同步都按此判断该用 seconds 还是 weightKg+reps 表意，统一在此定义避免多处重复构建。
+ */
+export const TIMED_EXERCISE_IDS = new Set(
+  SEED_EXERCISES.filter(e => e.special === 'seconds').map(e => e.id)
+)
 
 // PPL 三分化训练计划
 // dayType: push / pull / legs
@@ -533,7 +565,8 @@ export const PLAN_LABELS = SEED_WORKOUT_PLAN.reduce((acc, day) => {
 
 // PPL 练3休1 循环锚点：2026-08-11 = Push 日（本地时间）
 const SCHEDULE_ANCHOR = new Date(2026, 7, 11)
-const SCHEDULE_CYCLE = ['push', 'pull', 'legs', 'rest']
+// 循环序列（顺序即语义，导出给 stores/training.js 换算"插入休息日"所需偏移，别单独再抄一份）
+export const SCHEDULE_CYCLE = ['push', 'pull', 'legs', 'rest']
 
 /**
  * 计算任意日期的计划类型

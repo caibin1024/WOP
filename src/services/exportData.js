@@ -2,12 +2,9 @@ import { Capacitor } from '@capacitor/core'
 import { Share } from '@capacitor/share'
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
 import { query, todayStr } from '../database'
-import { PLAN_LABELS, SEED_EXERCISES } from '../database/seed'
+import { PLAN_LABELS, TIMED_EXERCISE_IDS } from '../database/seed'
 import { useProfileStore } from '../stores/profile'
 import { APP_VERSION } from '../version'
-
-// 计时动作（如平板支撑）：reps 列实际存秒数，导出时用 seconds 字段表意，避免被当作次数
-const TIMED_EXERCISE_IDS = new Set(SEED_EXERCISES.filter(e => e.special === 'seconds').map(e => e.id))
 
 const isNative = Capacitor.isNativePlatform()
 
@@ -31,8 +28,10 @@ export async function exportAllData() {
   // 汇总训练记录
   const logsByDate = {}
   const nameByExercise = {}
+  const dayTypeByDate = {}
   for (const r of trainingLogs) {
     nameByExercise[r.exercise_id] = r.exercise_name
+    dayTypeByDate[r.date] = r.day_type
     if (!logsByDate[r.date]) logsByDate[r.date] = {}
     if (!logsByDate[r.date][r.exercise_id]) logsByDate[r.date][r.exercise_id] = []
     if (TIMED_EXERCISE_IDS.has(r.exercise_id)) {
@@ -60,7 +59,7 @@ export async function exportAllData() {
         sets: sets
       }
     })
-    return { date, exercises }
+    return { date, dayType: dayTypeByDate[date] || null, exercises }
   })
 
   // 最新体重：body_records 时间正序，末条即最新

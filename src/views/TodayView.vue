@@ -203,7 +203,7 @@ const dayDescription = computed(() => {
 
 // 计时动作判定（仅平板支撑按秒记录；热身动作为自重，按次数）
 function isWarmupOrPlank(wde) {
-  return wde.special === 'seconds' || wde.exercise?.special === 'seconds'
+  return wde.exercise?.special === 'seconds'
 }
 
 // 动作目标强度文案：计时动作显示秒数（如"45s"），其余显示次数区间

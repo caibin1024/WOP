@@ -6,8 +6,12 @@ import { initDatabase, query, run, genId, todayStr } from '../database'
 import {
   getTodayDayType as seedGetTodayDayType,
   getDayTypeForDate as seedGetDayTypeForDate,
-  SEED_EXERCISES
+  SEED_EXERCISES,
+  SCHEDULE_CYCLE
 } from '../database/seed'
+
+// rest 在练三休一循环里的下标：顺延要把某一天锁成休息日，需要按它反推偏移增量
+const REST_INDEX = SCHEDULE_CYCLE.indexOf('rest')
 
 /**
  * 训练数据 Store
@@ -17,6 +21,7 @@ export const useTrainingStore = defineStore('training', () => {
   const todayDayType = ref(seedGetTodayDayType(1)) // 默认偏移 1：今天为休息日，避免首帧闪 Push
   const baselineOffset = ref(1)                    // 练三休一计划基线偏移（迁移自 schedule_offset_days，顺延不再改它）
   const scheduleChanges = ref([])                  // 顺延时间线：[{ date, offset }]，从 date 起有效偏移变为 offset
+  const undoStack = ref([])                        // 顺延前的排期快照栈（撤销用：每次顺延压一版，撤销弹一版）
   const scheduleLoaded = ref(false)                // 是否已从 DB 读取偏移
   const missStartDate = ref(todayStr())             // 漏练判断起始日（安装后开始，可调整）
   const todayExercises = ref([])        // 今日动作列表（含目标组数）
@@ -29,13 +34,6 @@ export const useTrainingStore = defineStore('training', () => {
   const lastRefreshedDate = ref('')
 
   const allExercises = ref([...SEED_EXERCISES])
-
-  // 计算：今日完成情况
-  const todayProgress = computed(() => {
-    const total = todayExercises.value.reduce((s, e) => s + e.targetSets, 0)
-    const done = todayLogs.value.filter(l => l.done).length
-    return { total, done, pct: total > 0 ? Math.round((done / total) * 100) : 0 }
-  })
 
   // 计算：今日是否已有训练记录（决定今日页显示计划 or 已完成提示）
   const hasTodayLog = computed(() => todayLogs.value.length > 0)
@@ -100,19 +98,38 @@ export const useTrainingStore = defineStore('training', () => {
     }
     try {
       const rows = await query("SELECT value FROM app_meta WHERE key = 'schedule_changes'", [])
-      if (rows.length) {
-        const arr = JSON.parse(rows[0].value)
-        if (Array.isArray(arr)) {
-          scheduleChanges.value = arr
-            .filter(c => c && typeof c.date === 'string' && Number.isFinite(Number(c.offset)))
-            .map(c => ({ date: c.date, offset: Number(c.offset) }))
-            .sort((a, b) => (a.date < b.date ? -1 : 1))
-        }
-      }
+      if (rows.length) scheduleChanges.value = parseChanges(rows[0].value)
     } catch (e) {
       // 解析失败视为无顺延时间线
     }
+    try {
+      const rows = await query("SELECT value FROM app_meta WHERE key = 'schedule_changes_undo'", [])
+      undoStack.value = rows.length ? parseUndoStack(rows[0].value) : []
+    } catch (e) {
+      // 读不到快照 = 没有可撤销的顺延（老库无此键，不会显示撤销按钮）
+    }
     scheduleLoaded.value = true
+  }
+
+  /** 时间线规整：丢掉字段缺失/类型不对的脏数据并按日期排序（effectiveOffsetFor 依赖有序） */
+  function normalizeChanges(arr) {
+    if (!Array.isArray(arr)) return []
+    return arr
+      .filter(c => c && typeof c.date === 'string' && Number.isFinite(Number(c.offset)))
+      .map(c => ({ date: c.date, offset: Number(c.offset) }))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  }
+  function parseChanges(raw) {
+    try { return normalizeChanges(JSON.parse(raw)) } catch (e) { return [] }
+  }
+  /** 撤销快照栈：每项是一版完整时间线 */
+  function parseUndoStack(raw) {
+    try {
+      const arr = JSON.parse(raw)
+      return Array.isArray(arr) ? arr.map(normalizeChanges) : []
+    } catch (e) {
+      return []
+    }
   }
 
   /** 本地日期位移：'YYYY-MM-DD' + days → 'YYYY-MM-DD'（用本地时间构造，避免 new Date('YYYY-MM-DD') 时区陷阱） */
@@ -391,22 +408,84 @@ export const useTrainingStore = defineStore('training', () => {
   )
 
   /**
-   * 停练顺延：从顺延起点起练三休一计划后移 1 天。
-   * 在顺延时间线写 change point（仅影响该日及之后），起点之前日期的日型保持不变。
+   * 顺延实际插入休息日的那一天：从顺延起点起找第一个"本来要训练"的日子。
+   *
+   * 不能直接用起点：起点可能本来就是休息日（自然轮空，或当天已经顺延过一次），
+   * 此时在起点插入休息日等于白插 —— 后移量会与"后移 1 天"的文案对不上，还会在
+   * 同一个起点反复叠 change point，把后续日型的相位带偏。顺到下一个训练日再插。
+   */
+  const postponeInsertDate = computed(() => {
+    let d = postponeStartDate.value
+    for (let i = 0; i < 7; i++) {
+      if (getDayTypeForDate(d) !== 'rest') return d
+      d = shiftDate(d, 1)
+    }
+    return postponeStartDate.value // 理论上到不了（练三休一最多连休 1 天）
+  })
+
+  /** 是否有可撤销的顺延（撤销栈非空） */
+  const canUndoPostpone = computed(() => undoStack.value.length > 0)
+
+  /** 排期键值写回 app_meta（顺延时间线 / 撤销快照栈共用） */
+  async function writeMeta(key, value) {
+    await run(
+      `INSERT INTO app_meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [key, JSON.stringify(value)]
+    )
+  }
+
+  /** 时间线写回 app_meta（唯一写入口），并压入撤销快照栈 */
+  async function commitScheduleChanges(list, nextStack) {
+    // 先写时间线再写快照栈：万一中途中断，快照栈落后一版 → 撤销变成空操作，不会跳到没出现过的排期
+    await writeMeta('schedule_changes', list)
+    await writeMeta('schedule_changes_undo', nextStack)
+    scheduleChanges.value = list
+    undoStack.value = nextStack
+    await refreshToday()
+  }
+
+  /**
+   * 停练顺延：把 postponeInsertDate 插成一个休息日，该日原本的日型及之后排期整体后移 1 天。
+   * 只影响插入日及之后的日期，已执行日的日型与训练记录都不变。
+   *
+   * 为什么不是简单的"偏移整体 +1"：偏移 +1 只让每一天取到它"前一天"的日型。
+   * 若插入日前一天是训练日（比如昨天刚练 Push），插入日就变成 Push —— 而 Push 昨天已经练完，
+   * 用户等于重练一天，真正该练的日型被顶掉。所以插入日必须显式锁成 rest。
+   *
+   * 偏移与日型的换算（见 seed.js getDayTypeForDate）：type(d, offset) = CYCLE[(diffDays(d) - offset) % 4]。
+   * 插入日当前日型在循环里的下标记作 i，偏移增量加 k 后下标变为 (i - k) % 4，
+   * 要落到 rest（下标 REST_INDEX）即 k = (i - REST_INDEX + 4) % 4。
    */
   async function postponeSchedule() {
-    const start = postponeStartDate.value
-    const next = effectiveOffsetFor(start) + 1
-    const list = scheduleChanges.value.filter(c => c.date !== start)
-    list.push({ date: start, offset: next })
-    list.sort((a, b) => (a.date < b.date ? -1 : 1))
-    await run(
-      `INSERT INTO app_meta (key, value) VALUES ('schedule_changes', ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [JSON.stringify(list)]
-    )
-    scheduleChanges.value = list
-    await refreshToday()
+    const start = postponeInsertDate.value
+    const next = shiftDate(start, 1)
+    const base = effectiveOffsetFor(start)
+    const idx = SCHEDULE_CYCLE.indexOf(getDayTypeForDate(start, base))
+    const restShift = ((idx - REST_INDEX) % 4 + 4) % 4
+    const list = scheduleChanges.value
+      // 同日重复顺延以最后一次为准：先摘掉与新写入两条同日的旧点，避免同一日期堆多条 change point
+      .filter(c => c.date !== start && c.date !== next)
+      .concat([
+        { date: start, offset: base + restShift }, // 插入日：休息
+        { date: next, offset: base + 1 }           // 次日起：原日型序列整体后移 1 天
+      ])
+      // 三路比较：两路比较在日期相同时会返回 1，可能把同日多条 change point 的顺序打乱
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    await commitScheduleChanges(list, [...undoStack.value, scheduleChanges.value])
+  }
+
+  /**
+   * 撤销上一次顺延：恢复顺延时压栈的那版排期，并弹掉该快照，可连续撤销多次。
+   *
+   * 为什么要存快照而不是"弹掉末尾两条 change point"：下一次顺延的插入日可能正好落
+   * 在上一次写入的次日（连续顺延），那次写入会覆盖掉上一版的 change point ——
+   * 时间线本身已无法还原上一版排期，只能靠快照。
+   */
+  async function undoPostpone() {
+    if (!undoStack.value.length) return
+    const restored = undoStack.value[undoStack.value.length - 1]
+    await commitScheduleChanges(restored, undoStack.value.slice(0, -1))
   }
 
   /**
@@ -536,7 +615,7 @@ export const useTrainingStore = defineStore('training', () => {
    * @returns {setNumbers:number[], perSet:Object<number,{weightKg:number|null,reps:number|null}>}
    */
   async function getEffectiveDefaults(exerciseId, wde) {
-    const isTimed = wde?.special === 'seconds' || wde?.exercise?.special === 'seconds'
+    const isTimed = wde?.exercise?.special === 'seconds'
     const isWarmup = wde?.exercise?.category === 'warmup'
     const sysWeight = wde?.exercise?.recommendedWeightKg ?? null
     const sysReps = isTimed
@@ -712,6 +791,7 @@ export const useTrainingStore = defineStore('training', () => {
     scheduleOffset,
     scheduleLoaded,
     postponeStartDate,
+    postponeInsertDate,
     effectiveOffsetFor,
     missStartDate,
     loadMissStart,
@@ -722,6 +802,7 @@ export const useTrainingStore = defineStore('training', () => {
     allExercises,
     planByDay,
     loadPlan,
+    refreshToday,
     swapPlanExercise,
     addPlanExercise,
     removePlanExercise,
@@ -729,11 +810,12 @@ export const useTrainingStore = defineStore('training', () => {
     savePlanSlot,
     savePlanWeightDefault,
     isLoading,
-    todayProgress,
     hasTodayLog,
     init,
     loadScheduleOffset,
     postponeSchedule,
+    undoPostpone,
+    canUndoPostpone,
     getDayTypeForDate,
     logSet,
     saveAllToday,

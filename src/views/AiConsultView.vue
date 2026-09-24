@@ -6,7 +6,7 @@
       </button>
       <div>
         <h1 class="ai-title"><AppIcon name="sparkles" :size="20" /> AI 咨询</h1>
-        <div class="subtitle">带记忆的持续会话 · DeepSeek</div>
+        <div class="subtitle">带记忆的持续会话 · {{ ai.providerLabel }}</div>
       </div>
     </header>
 
@@ -14,7 +14,7 @@
       <!-- 未配置 Key -->
       <div v-if="!ai.hasApiKey" class="ai-empty">
         <AppIcon name="sparkles" :size="40" style="color: var(--text-tertiary)" />
-        <p class="ai-empty-title">尚未配置 DeepSeek API Key</p>
+        <p class="ai-empty-title">尚未配置 {{ ai.providerLabel }} API Key</p>
         <p class="ai-hint">请到「设置 → AI 咨询」填写你的 API Key，即可开始与 AI 教练对话。</p>
         <button class="btn btn-primary" @click="goSettings">
           去设置配置
