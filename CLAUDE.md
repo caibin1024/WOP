@@ -1,11 +1,11 @@
 # CLAUDE.md — WOP 健身 App 项目须知
 
 > 供 AI 助手（及新接手的人）快速上手。改代码前请先读完「已知坑与地雷」一节。
-> 最后更新：2026-09-24（v1.2.0）
+> 最后更新：2026-10-13（v1.3.0：自增动作库 + 可配置训练周期 + 训练日志补录；2026-09-30 含 v1.2.0 未发版修复：web 端 jeep-sqlite 初始化）
 
 ## 项目是什么
 
-个人自用的健身训练 App（中文界面，**单用户、无后端、无云端**）。练三休一 PPL 循环训练 + 有氧打卡 + AI 教练咨询（DeepSeek / 小米 Token Plan 双供应商可切换）。目标设备是用户自己的小米手机，仅内部分发，不上应用商店。
+个人自用的健身训练 App（中文界面，**单用户、无后端、无云端**）。PPL 循环训练（周期可配置，默认练三休一）+ 有氧打卡 + AI 教练咨询（DeepSeek / 小米 Token Plan 双供应商可切换）。目标设备是用户自己的小米手机，仅内部分发，不上应用商店。
 
 - 包名 `com.xdw.fitness`，应用名 `WOP`
 - 所有数据存在本机 SQLite，**不上云**；导出 JSON 也不含 AI Key / 会话 / 记忆
@@ -71,7 +71,7 @@ cp android/app/build/outputs/apk/debug/app-debug.apk WOP-v<版本号>.apk
 ```
 src/
   views/        页面：Today / History(+Detail) / ExerciseList(+Detail) / Aerobic / Body / Settings / AiConsult
-  components/   AppIcon、BackLayer、CalendarCard、ExercisePickerSheet、ProgressChart
+  components/   AppIcon、BackLayer、CalendarCard、ExercisePickerSheet、ExerciseFormSheet、CycleEditorSheet、ProgressChart
   stores/       Pinia：training / aerobic / body / profile / ai / theme
   database/     index.js（建表 + 迁移 + query/run）、seed.js（动作库 + 预置计划 + 调度算法）
   services/     aiCoach.js（提示词 + 双供应商调用，`AI_PROVIDERS` 配置表）、exportData.js、importData.js
@@ -88,14 +88,14 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 
 | 表 | 用途 |
 |---|---|
-| `exercises` | **死表**：SCHEMA 里建了但全项目从无读写。动作库真实来源是 `seed.js` 的 `SEED_EXERCISES`（44 个动作），由 `training.js` 直接载入内存 |
+| `exercises` | **自定义动作表（v1.3.0 启用，曾是死表）**：内置 44 个动作仍在 `seed.js` 的 `SEED_EXERCISES` 内存里，此表只存用户自增的动作——**表里有 = 自定义，无标志位**。含 `recommended_weight_kg` / `recommended_seconds` / `special` 三列（SCHEMA + PRAGMA 缺列 ALTER 双路径）。加载入口唯一：`training.loadCustomExercises()` → `allExercises = [...SEED, ...rows]` |
 | `workout_day_exercises` | **计划动作配置（唯一数据源）**，设置页可换/增删/排序 |
 | `training_logs` | 训练记录，`reps` 列对计时动作（平板支撑等）存的是**秒数** |
 | `training_draft` | 今日页未点"完成"前的草稿，防闪退丢输入 |
 | `body_records` | 体重 / BMI / 体脂 |
 | `aerobic_logs` | 有氧，`type` ∈ `swim` / `stair` / `treadmill` / `bike` |
 | `exercise_defaults` | 每个动作的默认重量/次数/秒数/组数 |
-| `app_meta` | 键值表：计划偏移（`schedule_offset_days` 基线）、顺延时间线（`schedule_changes`）、顺延撤销快照栈（`schedule_changes_undo`）、漏练起始日、个人资料、AI 供应商选择（`ai_provider`）、两把 AI Key（`deepseek_api_key` / `mimo_api_key`）、AI 长期记忆、迁移标记。**AI 这三键是"读默认值"语义（读不到 `ai_provider` 就当 deepseek），无迁移** |
+| `app_meta` | 键值表：计划偏移（`schedule_offset_days` 基线）、顺延时间线（`schedule_changes`）、顺延撤销快照栈（`schedule_changes_undo`）、**训练周期（`schedule_cycle`，JSON 数组，v1.3.0——与 `ai_provider` 同为"读默认值"语义：读不到/`isValidScheduleCycle` 不过就当默认 4 槽，零迁移）**、漏练起始日、个人资料、AI 供应商选择（`ai_provider`）、两把 AI Key（`deepseek_api_key` / `mimo_api_key`）、AI 长期记忆、迁移标记。**AI 这三键是"读默认值"语义（读不到 `ai_provider` 就当 deepseek），无迁移** |
 | `ai_messages` | AI 会话滚动窗口 |
 | `ai_consult_records` | AI 咨询记录列表（独立于会话，折叠记忆时不丢） |
 
@@ -124,6 +124,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 - 增量上传靠各表的 `ai_uploaded` 水位列，只传新增行
 - **记忆折叠失败不能阻断咨询**：`maintainMemory()` 在 `sendRequest` 里被 try/catch 包住，静默跳过
 - 记忆维护用独立的 `MEMORY_SYSTEM_PROMPT`（不是教练角色），且 `maxTokens` 要够大（2000 中文字符 ≈ 4000 token）
+- **`SYSTEM_PROMPT` 是模块级静态常量（v1.3.0），带不了动态配置**：那段周期描述必须保持**周期中立**（"以【训练周期】为准"），真实周期序列由 `buildInitialContext`（建会话，需先 `try { await training.init() }`）与 `buildDataOverview`（每次问答）现算注入。改周期相关文案只动这两处 + 中立表述，别往 SYSTEM_PROMPT 里写具体序列
 
 ### 供应商切换（v1.2.0 起，双供应商）
 
@@ -141,6 +142,11 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 - **`run()` 不能在事务里嵌套**：插件原生实现里 `run(transaction=true)` 自己 `beginTransaction`，且 finally 中只要事务仍活跃就**无条件 `rollbackTransaction()`**——嵌在外层事务里会把整个外层事务回滚掉。
   **事务体内必须用 `runInTransaction()`**（内部传 `transaction=false`），配 `withTransaction(fn)` 使用。
 - **`IN (...)` 批量操作要分批**：SQLite 有参数上限，代码里统一 500 一批（见 `markUploaded`）。
+- **SCHEMA 按半角分号拆分执行，SCHEMA 注释里不能出现半角分号**（`--` 注释一样会被 split 切断，后半句会被当成独立语句执行报错）。表/列级注释写在 SCHEMA 外的普通注释里。
+- **Web 端"数据全空" ≠ 数据丢了，先查 jeep-sqlite 两件套**（2026-09-30 真实踩坑：web 测试版连预置计划都没有、刷新无效）：
+  ① `initWebSqlite` 必须把 `<jeep-sqlite>` **插进 DOM**——插件 `initWebStore` 是用 `querySelector` 取实例的，只 `defineCustomElements` 注册标签会抛 "element is not present in the DOM"；
+  ② `public/assets/sql-wasm.wasm` 必须存在，**且必须是 jeep-sqlite 构建时锁定的 sql.js 版本**——包本身不带 wasm（只在构建时拷进未发布的 `www/assets`），但 emscripten 胶水已**内置死**在 `dist/esm` 里：拿本项目 `node_modules/sql.js` 的 wasm（依赖声明 `^1.11.0`，实际会被解析到最新 1.14.1）会报 `LinkError: Import #34 ... requires a callable`，页面卡"加载中"。
+  缺任一个或版本不配 → `initDatabase` 全程走不通 → 所有 store 加载失败 → 页面表现像"什么数据都没有"或一直加载中，**其实手机端和浏览器存量数据都完好**。**jeep-sqlite 2.8.0 配 `sql.js@1.11.0`**（其 gitHead 的 package-lock 实证；1.11.0 的 wasm 已拷入 `public/assets/` 并随仓库提交，别用 `npm update` 后的新版覆盖）。该 wasm 会随 dist 进 APK（native 原生 SQLite 根本不加载它，纯死重，暂不处理）。
 
 ### Capacitor / Android
 
@@ -162,7 +168,14 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 - **顺延的插入日不是"顺延起点"**，而是起点起**第一个非 rest 的日期**（见 `postponeInsertDate`）。起点本来就轮空、或当天已顺延过一次时，在起点插入没有意义（后移量与文案对不上，还会反复叠 change point 把后续日型相位带偏）。UI 文案必须跟着 `postponeInsertDate` 走，别用 `postponeStartDate`。
 - **撤销顺延靠 `schedule_changes_undo` 快照栈**，不要改成"弹掉末尾两条 change point"：连续顺延时，下一次的插入日会覆盖上一版写入的 change point，时间线本身已无法还原上一版排期。
 - **`profile.load()` 不能加空载短路**（`if (loaded.value) return`）。`SettingsView.vue` 在**导入数据后**需要它强制重读 `app_meta`，把页面上的身高/年龄/目标刷新成导入文件里的新值；加短路会导致"导入后资料不刷新"。
-- **计时动作（`special === 'seconds'`）的 `reps` 列存的是秒数**。判断动作是否计时统一用 `seed.js` 导出的 `TIMED_EXERCISE_IDS`，不要各处自己 filter 一遍。
+- **计时动作（`special === 'seconds'`）的 `reps` 列存的是秒数**。判断动作是否计时统一用 `seed.js` 导出的 `TIMED_EXERCISE_IDS`，不要各处自己 filter 一遍。该 Set **保持对象导出**、内容由 `syncTimedExerciseIds(all)` 原地重建（`loadCustomExercises` 驱动）——消费方 `.has(id)` 才能零改动。
+- **顺延的 restShift 必须算术取下标**（v1.3.0 周期可含重复日型）：`idx = getCycleIndex(date, base, cycle)`、`restShift = ((idx - restIdx) % n + n) % n`，`restIdx = cycle.indexOf('rest')`。**不能用 `indexOf(日型)` 取 idx**——重复类型下返回第一个出现位，restShift 算错、插入日锁不成休。
+- **改周期 = 重置顺延，三键必须同事务**（`setScheduleCycle`）：一个事务里写 `schedule_cycle` + 清 `schedule_changes` + 清 `schedule_changes_undo`。旧时间线的整数偏移是按旧周期长度换算的，新周期下会被重新解释（未执行过去日期日型追溯改写、顺延点错位）。已执行日靠 training_logs 覆盖不受影响；过去无记录日期日型会变是**拍板接受的取舍**，确认框带"保存后今天将变为 X"预览（`previewTodayDayType`）。
+- **导入的计时判定用本地并集**：`importData` 里 `timedIds = 新 Set(TIMED_EXERCISE_IDS) ∪ 文件内计时动作`——**不能在事务里动全局 `TIMED_EXERCISE_IDS`**（回滚会让集合残留已删动作的幽灵 id，秒数会被后续会话当次数导入）。全局同步交给导入成功后的 `loadCustomExercises`。
+- **删除计时自定义动作后，历史记录按次数显示**：`special` 随动作行一起没了，`reps` 里的秒数只能当次数展示。记录本身不碰（`exercise_name` 快照保留），删除确认文案已警示——已知取舍，别"顺手修"。
+- **补录组号 = MAX+1 追加式，不回填空洞**（`addLogSet` / 今日页 `addSet` 一致）：`training_logs` 无 `UNIQUE(date, exercise_id, set_number)` 约束，填洞没有防冲突兜底；组号只是展示序号，不影响任何统计。组号从 `historyByDate` 内存算（与详情页 groups 同源），**别改成 SQL 现查**——LIMIT 3000 窗口外的日期页面本身进不去，现查会算出页面看不到的组号。
+- **`addLogSet` 只做参数推导（组号/日型/动作名快照），执行复用 `logSet`**：INSERT 与"今日 `loadTodayLogs`、总是 `loadHistory`"的重载语义只此一份，别在两处复制分叉。补录今天会推高 `hasTodayLog` → 今日页切完成态、`saveAllToday` 不可达，两者**结构性互斥**，组号不可能冲突（详情页补录入口与今日页归档的先后两条路径都论证过）。
+- **历史详情页补录的新建态用 `'new:'+exerciseId` 哨兵写进 `editingId`**：单变量保证「行内编辑」与「补录行」结构性互斥，且现有 `BackLayer(show="editingId !== ''")` 天然覆盖新建行——别另开一个状态变量。动作级合成卡片（`logs:[]`）的 `name` 必须走 `?.` 兜底链，换动作按钮对 0 组隐藏，`openSwapPicker` 开头要取消 pending 新建态（防批量换 id 后卡片错位）。
 - `wde.special` 不存在，只有 `wde.exercise.special`——别写错层级。
 
 ### 前端 / Vue
@@ -182,7 +195,8 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 
 ## 待办 / 已知未修
 
-- [ ] `exercises` 表是死表（见上表），可考虑从 SCHEMA 移除；但涉及建表语句清理，需确认老库兼容性，暂不动。
+（暂无）
 
+> 已修（v1.3.0）：`exercises` 表已启用为自定义动作存储（自增动作库），不再是死表；`confirmClear` 也**不清**它（自定义动作 = 配置，清了会造孤儿计划槽位）。
 > 已修（v1.1.2）：`confirmClear()` 现在会连带删掉 `app_meta` 的 `ai_memory`。
-> 注意「清空全部数据」**不清** `app_meta`：顺延时间线 / 撤销快照 / 漏练起始日 / 计划偏移都属于排期配置，不在清理范围内（与既有行为一致）。
+> 注意「清空全部数据」**不清** `app_meta`：顺延时间线 / 撤销快照 / 漏练起始日 / 计划偏移 / 训练周期都属于排期配置，不在清理范围内（与既有行为一致）。

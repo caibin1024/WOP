@@ -57,6 +57,11 @@
     <template v-else-if="name === 'check'">
       <path d="M4 12l5 5L20 6" />
     </template>
+    <template v-else-if="name === 'plus'">
+      <!-- 加号：补录加组/加动作等入口。此前 TodayView、SettingsView 已在用此名但无分支，渲染为空 SVG -->
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </template>
     <template v-else-if="name === 'export'">
       <path d="M12 3v12" />
       <path d="M7 8l5-5 5 5" />

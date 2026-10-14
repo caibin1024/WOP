@@ -42,22 +42,23 @@
           <AppIcon name="dumbbell" :size="20" class="row-icon" />
           <div class="row-text">
             <span class="row-title">训练计划</span>
-            <span class="row-sub">PPL 练3休1 · 今天{{ todayLabel }}</span>
+            <span class="row-sub">{{ cycleSummary }} · 今天{{ todayLabel }}</span>
           </div>
           <AppIcon name="chevron-down" :size="18" class="row-chevron" :class="{ open: openGroups.plan }" />
         </button>
         <div v-show="openGroups.plan" class="setting-body">
           <div class="plan-cycle">
             <div class="cycle-row">
-              <span class="cycle-day" :class="{ current: training.todayDayType === 'push' }">Push</span>
-              <span class="cycle-arrow">→</span>
-              <span class="cycle-day" :class="{ current: training.todayDayType === 'pull' }">Pull</span>
-              <span class="cycle-arrow">→</span>
-              <span class="cycle-day" :class="{ current: training.todayDayType === 'legs' }">Legs</span>
-              <span class="cycle-arrow">→</span>
-              <span class="cycle-day" :class="{ current: training.todayDayType === 'rest' }">Rest</span>
+              <!-- 高亮按下标而非日型匹配：周期可含重复日型，indexOf 类匹配会把同型槽位全点亮 -->
+              <template v-for="(t, i) in training.scheduleCycle" :key="i">
+                <span v-if="i > 0" class="cycle-arrow">→</span>
+                <span class="cycle-day" :class="{ current: i === todayCycleIndex }">{{ CYCLE_SHORT_LABELS[t] }}</span>
+              </template>
             </div>
-            <div class="cycle-note">练3天休1天循环 · 今天：{{ todayLabel }}</div>
+            <div class="cycle-note">
+              <span>{{ cycleSummary }} · 今天：{{ todayLabel }}</span>
+              <button class="cycle-edit-btn" @click="cycleEditorOpen = true">编辑周期</button>
+            </div>
           </div>
           <div class="plan-day-list">
             <template v-for="day in planDays" :key="day.dayType">
@@ -315,6 +316,9 @@
       @close="picker = null"
     />
 
+    <!-- 训练周期编辑面板（自带 BackLayer 接管返回键） -->
+    <CycleEditorSheet v-if="cycleEditorOpen" @close="cycleEditorOpen = false" />
+
     <!-- 选动作面板纳入返回键 -->
     <BackLayer :show="!!picker" @back="picker = null" />
   </div>
@@ -330,10 +334,11 @@ import { useAiStore } from '../stores/ai'
 import { useThemeStore } from '../stores/theme'
 import { exportAllData } from '../services/exportData'
 import { importAllData } from '../services/importData'
-import { PLAN_LABELS } from '../database/seed'
-import { initDatabase, run } from '../database'
+import { PLAN_LABELS, getCycleIndex } from '../database/seed'
+import { initDatabase, run, todayStr } from '../database'
 import AppIcon from '../components/AppIcon.vue'
 import ExercisePickerSheet from '../components/ExercisePickerSheet.vue'
+import CycleEditorSheet from '../components/CycleEditorSheet.vue'
 import BackLayer from '../components/BackLayer.vue'
 import { APP_VERSION } from '../version'
 
@@ -422,6 +427,19 @@ const planDays = computed(() =>
     return { dayType: dt, label: info.label || dt, description: info.description || '', slots }
   })
 )
+
+// 训练周期展示（v1.3.0 可配置）：分组副标题 + 周期条 + 今日槽位高亮
+const CYCLE_SHORT_LABELS = { push: 'Push', pull: 'Pull', legs: 'Legs', rest: 'Rest' }
+const cycleSummary = computed(() => {
+  const c = training.scheduleCycle
+  const train = c.filter(t => t !== 'rest').length
+  return `${c.length} 天循环（${train} 练 ${c.length - train} 休）`
+})
+// 今日所在槽位下标：effectiveOffset 与今日页同源，漏传/算错会高亮错槽位
+const todayCycleIndex = computed(() =>
+  getCycleIndex(new Date(), training.effectiveOffsetFor(todayStr()), training.scheduleCycle)
+)
+const cycleEditorOpen = ref(false)
 
 // 槽位级配置编辑态（组数/次数），懒创建
 const edits = reactive({})
@@ -632,12 +650,16 @@ async function onFileChosen(event) {
   const file = event.target.files && event.target.files[0]
   event.target.value = '' // 允许重复选择同一文件
   if (!file) return
-  if (!confirm('导入会覆盖当前的全部训练、身体与有氧数据（含自定义计划）。确定继续吗？')) return
+  if (!confirm('导入会覆盖当前的全部训练、身体与有氧数据（含自定义计划与自定义动作）。若文件带不同的训练周期，还会重置顺延时间线。确定继续吗？')) return
   importing.value = true
   try {
     const text = await readFileAsText(file)
     const counts = await importAllData(text)
     // 刷新各 store，让页面立即反映导入数据
+    // loadScheduleOffset 必须最先：它同时重载 scheduleCycle/顺延偏移，refreshToday 依赖新周期
+    // 自定义动作必须先于 loadPlan：loadPlan 按 allExercises join，顺序反了计划槽位会被静默丢弃
+    await training.loadScheduleOffset()
+    await training.loadCustomExercises()
     await training.loadPlan()
     await training.refreshToday()
     await training.loadHistory()
@@ -653,6 +675,8 @@ async function onFileChosen(event) {
     if (counts.body) parts.push(`体重 ${counts.body} 条`)
     if (counts.aerobic) parts.push(`有氧 ${counts.aerobic} 条`)
     if (counts.plan) parts.push(`计划 ${counts.plan} 个动作`)
+    if (counts.custom) parts.push(`自定义动作 ${counts.custom} 个`)
+    if (counts.cycleChanged) parts.push('训练周期已更新（顺延已重置）')
     alert('✅ 导入成功' + (parts.length ? '：' + parts.join('、') : ''))
   } catch (e) {
     console.error(e)
@@ -1092,10 +1116,29 @@ onMounted(async () => {
   color: var(--text-tertiary);
 }
 .cycle-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
   text-align: center;
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 12px;
+}
+.cycle-edit-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent-strong, var(--accent));
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 32px;
+}
+.cycle-edit-btn:active {
+  opacity: 0.7;
 }
 .settings-actions {
   display: flex;

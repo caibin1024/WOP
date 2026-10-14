@@ -3,8 +3,13 @@
     <!-- 冻结块：标题 + 分类筛选条一起固定，列表从下方穿过 -->
     <div class="head-sticky">
       <div class="page-header">
-        <h1>动作库</h1>
-        <div class="subtitle">{{ exercises.length }} 个动作 · 点击查看教学</div>
+        <div class="head-text">
+          <h1>动作库</h1>
+          <div class="subtitle">{{ exercises.length }} 个动作 · 点击查看教学</div>
+        </div>
+        <button class="add-btn" @click="formOpen = true">
+          <span class="add-plus">＋</span> 新增动作
+        </button>
       </div>
     </div>
 
@@ -40,17 +45,22 @@
       <AppIcon name="book" :size="44" style="color: var(--text-tertiary)" />
       <div style="margin-top:12px">该分类暂无动作</div>
     </div>
+
+    <!-- 新增自定义动作面板（保存后 store 重载 allExercises，列表自动刷新） -->
+    <ExerciseFormSheet v-if="formOpen" @close="formOpen = false" @saved="formOpen = false" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useTrainingStore } from '../stores/training'
 import { MUSCLE_GROUP_LABELS } from '../models'
 import AppIcon from '../components/AppIcon.vue'
+import ExerciseFormSheet from '../components/ExerciseFormSheet.vue'
 
 const training = useTrainingStore()
 const activeCat = ref('all')
+const formOpen = ref(false)
 
 const categories = [
   { key: 'all', label: '全部' },
@@ -69,6 +79,13 @@ const exercises = computed(() => training.allExercises)
 const filteredExercises = computed(() => {
   if (activeCat.value === 'all') return exercises.value
   return exercises.value.filter(e => e.category === activeCat.value)
+})
+
+// 深链直达本页时 store 可能尚未初始化（自定义动作与计划都没加载），init 幂等兜底
+onMounted(async () => {
+  try {
+    await training.init()
+  } catch (e) { /* 初始化失败保持当前内容，不阻塞页面 */ }
 })
 </script>
 
@@ -92,6 +109,39 @@ const filteredExercises = computed(() => {
   -webkit-backdrop-filter: none;
   border-bottom: none;
   padding-bottom: var(--sp-4);
+  /* 标题块与新增按钮左右排布 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.head-text {
+  flex: 1;
+  min-width: 0;
+}
+.add-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: none;
+  border-radius: 24px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  box-shadow: 0 4px 16px var(--accent-glow);
+  transition: transform 0.1s;
+}
+.add-btn:active {
+  transform: scale(0.96);
+}
+.add-plus {
+  font-size: 15px;
+  line-height: 1;
 }
 .filter-row {
   display: flex;

@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { Share } from '@capacitor/share'
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
 import { query, todayStr } from '../database'
-import { PLAN_LABELS, TIMED_EXERCISE_IDS } from '../database/seed'
+import { PLAN_LABELS, TIMED_EXERCISE_IDS, mapExerciseRow, SCHEDULE_CYCLE, isValidScheduleCycle } from '../database/seed'
 import { useProfileStore } from '../stores/profile'
 import { APP_VERSION } from '../version'
 
@@ -17,13 +17,25 @@ export async function exportAllData() {
   const profile = useProfileStore()
   if (!profile.loaded) await profile.load()
 
-  const [trainingLogs, bodyRecords, aerobicLogs, exerciseDefaults, planRows] = await Promise.all([
+  const [trainingLogs, bodyRecords, aerobicLogs, exerciseDefaults, planRows, customRows, cycleRows] = await Promise.all([
     query('SELECT * FROM training_logs ORDER BY date, set_number'),
     query('SELECT * FROM body_records ORDER BY date'),
     query('SELECT * FROM aerobic_logs ORDER BY date'),
     query('SELECT * FROM exercise_defaults ORDER BY exercise_id'),
-    query('SELECT * FROM workout_day_exercises ORDER BY day_type, sort_order')
+    query('SELECT * FROM workout_day_exercises ORDER BY day_type, sort_order'),
+    query('SELECT * FROM exercises ORDER BY name'),
+    // 周期配置直接读库不依赖 store（导出只依赖 profile store 的既有约定，避免引入未初始化状态）
+    query("SELECT value FROM app_meta WHERE key = 'schedule_cycle'")
   ])
+
+  // 训练周期：读不到/非法 → 默认 4 槽（与 store 的读默认值语义一致；旧导出文件没有此键，导入侧兼容）
+  let scheduleCycle = SCHEDULE_CYCLE
+  if (cycleRows.length) {
+    try {
+      const parsed = JSON.parse(cycleRows[0].value)
+      if (isValidScheduleCycle(parsed)) scheduleCycle = parsed
+    } catch (e) { /* 解析失败按默认周期导出 */ }
+  }
 
   // 汇总训练记录
   const logsByDate = {}
@@ -122,7 +134,11 @@ export async function exportAllData() {
       reps: r.reps,
       seconds: r.seconds,
       targetSets: r.target_sets
-    }))
+    })),
+    // 自定义动作（v1.3.0 起带此段；旧文件导入时按"无自定义动作"兼容处理）
+    customExercises: customRows.map(mapExerciseRow),
+    // 训练周期（v1.3.0 起带此段；旧文件导入时保留本机周期）
+    scheduleCycle
   }
 
   const json = JSON.stringify(exportData, null, 2)

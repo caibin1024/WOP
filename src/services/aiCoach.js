@@ -38,13 +38,18 @@ export const AI_PROVIDERS = {
 }
 const isNative = Capacitor.isNativePlatform()
 
+// 日型 → 提示词标签（SYSTEM_PROMPT 是模块级静态常量不能带动态周期，
+// 真实周期序列由 buildInitialContext / buildDataOverview 每次现算注入）
+const CYCLE_TYPE_LABELS = { push: 'Push 推日', pull: 'Pull 拉日', legs: 'Legs 腿核日', rest: '休息日' }
+
 // 滚动对话窗口：只保留最近 N 条真实对话消息（data/ask/preset/reply），更早的折叠进长期记忆
 export const MEMORY_WINDOW_SIZE = 30
 // 长期记忆上限（字符数）：超限时 AI 更新记忆做去重精简，保留关键事实
 export const MEMORY_MAX_CHARS = 2000
 
 export const SYSTEM_PROMPT = `你是一位专业、细致的私人健身教练，正在与用户进行持续对话。
-用户采用"练三休一"循环（Push 推日 → Pull 拉日 → Legs 腿核日 → 休息日），休息日可能做有氧。
+用户采用自定义的训练周期循环（日型为 Push 推日 / Pull 拉日 / Legs 腿核日 / 休息日的重复序列，
+可能与默认"练三休一"不同），具体序列以每次问答注入的【训练周期】为准，休息日可能做有氧。
 训练偶尔会延期或顺延，具体哪天练了哪部分，一律以用户陆续同步给你的训练日志日期为准。
 请严格遵循：
 1. 只依据已同步给你的训练日志、身体数据、有氧记录作答，不要编造；数据不足时如实说明"记录不足以判断"。
@@ -64,14 +69,19 @@ export const MEMORY_SYSTEM_PROMPT = `你是一个记忆整理助手，只负责�
 
 /**
  * 初始上下文（新建会话时发送，兼当连接测试）：
- * 个人资料 + 练三休一节奏，请 AI 简短确认并等待后续数据与提问。
+ * 个人资料 + 当前训练周期序列，请 AI 简短确认并等待后续数据与提问。
+ * 周期必须现算：模块级常量带不了动态配置，漏 init 会让深链直达的会话拿到默认 4 槽。
  */
 export async function buildInitialContext() {
   const profile = useProfileStore()
   if (!profile.loaded) await profile.load()
+  const training = useTrainingStore()
+  try { await training.init() } catch (e) { /* 未就绪则用 store 当前值（默认 4 槽），不阻断建会话 */ }
+  const cycle = training.scheduleCycle
+  const cycleSeq = cycle.map(t => CYCLE_TYPE_LABELS[t] || t).join(' → ')
   const genderTxt = profile.gender === 'male' ? '男' : '女'
   return `【我的训练安排】
-我采用"练三休一"循环训练（Push 推日 → Pull 拉日 → Legs 腿核日 → 休息日），休息日可能做有氧。
+我采用 ${cycle.length} 天训练周期循环：${cycleSeq}，休息日可能做有氧。
 训练偶尔会有延期或顺延，具体哪天练了哪部分，请以我之后陆续同步的训练日志日期为准。
 
 【个人资料】
@@ -189,6 +199,13 @@ export async function buildDataOverview() {
   ])
 
   const parts = []
+
+  // 训练周期：每次问答现算注入（周期用户可改，SYSTEM_PROMPT 静态带不了；
+  // 同时给 SYSTEM_PROMPT 里"以【训练周期】为准"的表述兜底）
+  const cycle = training.scheduleCycle
+  parts.push(
+    `【训练周期】${cycle.map(t => CYCLE_TYPE_LABELS[t] || t).join(' → ')}（共 ${cycle.length} 天循环）`
+  )
 
   // 今日计划：动态注入，AI 在任意对话里都知道今天该练什么（休息日同样说明）
   const dt = training.todayDayType

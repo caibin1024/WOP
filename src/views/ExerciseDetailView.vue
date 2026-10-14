@@ -1,12 +1,22 @@
 <template>
   <div class="exercise-detail-view">
     <div v-if="exercise" class="detail-wrap">
-      <!-- 返回 -->
+      <!-- 返回 + 自定义动作的编辑/删除入口（内置 44 个只读，无入口） -->
       <div class="detail-topbar">
         <button class="back-btn" @click="goBack">
           <AppIcon class="back-icon" name="arrow-right" :size="18" />
           <span>返回动作库</span>
         </button>
+        <div v-if="isCustom" class="topbar-actions">
+          <button class="back-btn" @click="editing = true">
+            <AppIcon name="pencil" :size="15" />
+            <span>编辑</span>
+          </button>
+          <button class="back-btn danger" @click="onDelete">
+            <AppIcon name="trash" :size="15" />
+            <span>删除</span>
+          </button>
+        </div>
       </div>
 
       <!-- 头部 -->
@@ -64,6 +74,10 @@
       <AppIcon name="book" :size="44" style="color: var(--text-tertiary)" />
       <div style="margin-top:12px">未找到该动作</div>
     </div>
+
+    <!-- 编辑自定义动作面板 -->
+    <ExerciseFormSheet v-if="editing && exercise" :exercise="exercise"
+      @close="editing = false" @saved="editing = false" />
   </div>
 </template>
 
@@ -71,8 +85,10 @@
 import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTrainingStore } from '../stores/training'
+import { SEED_ID_SET } from '../database/seed'
 import { MUSCLE_GROUP_LABELS } from '../models'
 import AppIcon from '../components/AppIcon.vue'
+import ExerciseFormSheet from '../components/ExerciseFormSheet.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -83,6 +99,10 @@ const exercise = computed(() => {
   return training.allExercises.find(e => e.id === id)
 })
 
+// 表里有 = 自定义（内置 44 个 id 永远在 SEED 里），自定义才显示编辑/删除
+const isCustom = computed(() => !SEED_ID_SET.has(route.params.id))
+const editing = ref(false)
+
 // 该动作是否在自定义计划中（在计划内 → 默认配置去设置页调整）
 const inPlan = ref(false)
 
@@ -91,10 +111,22 @@ function goBack() {
   router.back()
 }
 
+// 删除自定义动作：断计划/默认值引用，训练记录保留（拍板决策），删完回列表停在"未找到"空态没有意义
+async function onDelete() {
+  if (!confirm('删除该动作？计划槽位与默认值将一并移除，训练记录保留（历史计时记录将按次数显示）。')) return
+  try {
+    await training.removeCustomExercise(exercise.value.id)
+    router.back()
+  } catch (e) {
+    alert(e?.message || '删除失败，请重试')
+  }
+}
+
 // 返回键由 App.vue 全局统一处理；顶部返回按钮走 goBack
 onMounted(async () => {
   try {
-    await training.loadPlan()
+    // 深链直达本页时 store 可能未初始化：init 幂等，含自定义动作与计划加载
+    await training.init()
     const exId = exercise.value?.id
     if (exId) {
       inPlan.value = ['push', 'pull', 'legs'].some(dt =>
@@ -112,6 +144,22 @@ onMounted(async () => {
 }
 .detail-topbar {
   margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+}
+.back-btn.danger {
+  color: var(--danger, #ef4444);
+}
+.back-btn.danger:hover {
+  color: var(--danger, #ef4444);
+  border-color: var(--danger, #ef4444);
 }
 .back-btn {
   display: inline-flex;

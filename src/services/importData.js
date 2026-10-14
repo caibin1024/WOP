@@ -1,5 +1,5 @@
-import { runInTransaction, withTransaction, genId, todayStr } from '../database'
-import { TIMED_EXERCISE_IDS, SEED_WORKOUT_PLAN, getDayTypeForDate } from '../database/seed'
+import { runInTransaction, withTransaction, genId, todayStr, query } from '../database'
+import { TIMED_EXERCISE_IDS, SEED_WORKOUT_PLAN, SEED_ID_SET, getDayTypeForDate, SCHEDULE_CYCLE, isValidScheduleCycle } from '../database/seed'
 
 const DAY_TYPES = ['push', 'pull', 'legs']
 
@@ -11,11 +11,11 @@ for (const day of SEED_WORKOUT_PLAN) {
 
 /**
  * 导入训练数据（覆盖式恢复快照）
- * 解析导出 JSON，清空 5 张训练数据表后按结构逐项写回。
+ * 解析导出 JSON，清空训练数据表与自定义动作表后按结构逐项写回。
  * 清空 + 写回在同一事务内：任一步失败整体回滚，不会留下"旧数据已删、新数据半写"的损坏状态。
  * 保留 app_meta 里的计划偏移/漏练起始日、AI 会话等与训练数据无关的键。
  * @param {string} jsonText 导出文件内容
- * @returns {Promise<{plan:number, training:number, body:number, aerobic:number, defaults:number}>}
+ * @returns {Promise<{plan:number, training:number, body:number, aerobic:number, defaults:number, custom:number, cycleChanged:number}>}
  */
 export async function importAllData(jsonText) {
   let data
@@ -39,7 +39,42 @@ export async function importAllData(jsonText) {
     }
   }
 
-  const counts = { plan: 0, training: 0, body: 0, aerobic: 0, defaults: 0 }
+  // 自定义动作（v1.3.0 起导出格式带此段，旧文件没有 → 按"无自定义动作"兼容，即恢复后自定义动作库为空）。
+  // 逐行校验：id 缺失 / 与内置冲突 / 文件内重复 → 跳过（伪造内置 id 会顶替动作库数据）。
+  const fileCustom = Array.isArray(data.customExercises) ? data.customExercises : []
+  const acceptedCustom = []
+  const seenIds = new Set()
+  for (const e of fileCustom) {
+    if (!e?.id || !e?.name || SEED_ID_SET.has(e.id) || seenIds.has(e.id)) continue
+    seenIds.add(e.id)
+    acceptedCustom.push(e)
+  }
+
+  // 计时判定用「全局集合 ∪ 文件内计时动作」的本地并集：
+  // 不能在事务里动全局 TIMED_EXERCISE_IDS（回滚会让集合残留已删动作的幽灵 id），
+  // 全局同步交给导入成功后 SettingsView 调 loadCustomExercises（内含 syncTimedExerciseIds）。
+  const timedIds = new Set(TIMED_EXERCISE_IDS)
+  for (const e of acceptedCustom) {
+    if (e.special === 'seconds') timedIds.add(e.id)
+    else if (Math.round(Number(e.recommendedSeconds) || 0) > 0) timedIds.add(e.id)
+  }
+
+  // 训练周期：文件非法/缺失 → 视为"无周期信息"，导入后保留本机周期与顺延（旧导出文件兼容）。
+  // 文件周期与本机不同 → 事务内写入新周期并清空顺延时间线与撤销栈（与改周期重置的语义一致，
+  // 否则旧 change point 建立在旧周期相位上，会产生"时间旅行"错乱）。
+  const fileCycle = isValidScheduleCycle(data.scheduleCycle) ? [...data.scheduleCycle] : null
+  let currentCycle = SCHEDULE_CYCLE
+  try {
+    const rows = await query("SELECT value FROM app_meta WHERE key = 'schedule_cycle'")
+    if (rows.length) {
+      const parsed = JSON.parse(rows[0].value)
+      if (isValidScheduleCycle(parsed)) currentCycle = parsed
+    }
+  } catch (e) { /* 读不到按默认周期 */ }
+  const cycleChanged = !!fileCycle && JSON.stringify(fileCycle) !== JSON.stringify(currentCycle)
+  const dayCycle = fileCycle || currentCycle
+
+  const counts = { plan: 0, training: 0, body: 0, aerobic: 0, defaults: 0, custom: 0, cycleChanged: 0 }
 
   // 覆盖式恢复：清空旧训练数据 + 写回新数据必须在同一事务里。
   // 若不用事务，中途失败（字段非法/磁盘满）会停在"旧数据已删、新数据只写了一半"的损坏状态。
@@ -50,6 +85,7 @@ export async function importAllData(jsonText) {
     await runInTransaction('DELETE FROM body_records')
     await runInTransaction('DELETE FROM aerobic_logs')
     await runInTransaction('DELETE FROM exercise_defaults')
+    await runInTransaction('DELETE FROM exercises')
 
     // 1. 个人资料（体重不入库，以 body_records 最新记录为准）
     if (data.userProfile) {
@@ -67,6 +103,43 @@ export async function importAllData(jsonText) {
           [k, v]
         )
       }
+    }
+
+    // 1.4 训练周期（app_meta 键，与顺序无关）：仅当文件带合法周期且与本机不同时写入，
+    // 顺带清空顺延时间线与撤销栈。三键同一事务：防止"周期已换、时间线还挂在旧相位"的中间态。
+    if (cycleChanged) {
+      await runInTransaction(
+        'INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        ['schedule_cycle', JSON.stringify(fileCycle)]
+      )
+      await runInTransaction(
+        'INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        ['schedule_changes', '[]']
+      )
+      await runInTransaction(
+        'INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        ['schedule_changes_undo', '[]']
+      )
+      counts.cycleChanged = 1
+    }
+
+    // 1.5 自定义动作 → exercises（必须先于计划写回：loadPlan 靠 allExercises join，缺动作会丢槽位）
+    for (const e of acceptedCustom) {
+      const seconds = Math.round(Number(e.recommendedSeconds) || 0)
+      const special = seconds > 0 ? 'seconds' : null
+      let weight = null
+      if (!special && e.recommendedWeightKg != null && e.recommendedWeightKg !== '') {
+        const n = Number(e.recommendedWeightKg)
+        if (Number.isFinite(n) && n >= 0) weight = n
+      }
+      await runInTransaction(
+        `INSERT INTO exercises (id, name, category, is_machine, target_muscle, instructions, video_url, image_asset_path, common_mistakes, tips, recommended_weight_kg, recommended_seconds, special)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [e.id, String(e.name), String(e.category || 'chest'), e.isMachine ? 1 : 0,
+         e.targetMuscle || '', e.instructions || '', e.videoUrl || '', e.imageAssetPath || '',
+         e.commonMistakes || '', e.tips || '', weight, special ? seconds : null, special]
+      )
+      counts.custom++
     }
 
     // 2. 训练计划 → workout_day_exercises（sort_order 按数组顺序）
@@ -91,9 +164,9 @@ export async function importAllData(jsonText) {
       const date = session?.date
       if (!date) continue
       const exerciseIds = (session.exercises || []).map(e => e.exerciseId)
-      const dayType = inferDayType(session, exerciseIds, date, planIdsByDay)
+      const dayType = inferDayType(session, exerciseIds, date, planIdsByDay, dayCycle)
       for (const ex of session.exercises || []) {
-        const isTimed = TIMED_EXERCISE_IDS.has(ex.exerciseId)
+        const isTimed = timedIds.has(ex.exerciseId)
         for (const s of ex.sets || []) {
           const reps = isTimed ? (s.seconds ?? 0) : (s.reps ?? 0)
           const weight = isTimed ? 0 : (s.weightKg ?? 0)
@@ -160,9 +233,10 @@ export async function importAllData(jsonText) {
  * 推断某次训练记录的 day_type：
  * 1. 导出文件自带 dayType 直接用；
  * 2. 用该次动作命中导出计划的哪个日型最多；
- * 3. 兜底按练三休一锚点（偏移 1）推算。
+ * 3. 兜底按周期锚点（偏移 1）推算——用导入目标周期而非本机当前周期，
+ *    否则恢复到新周期的设备上会把历史记录推成错的日型。
  */
-function inferDayType(session, exerciseIds, date, planIdsByDay) {
+function inferDayType(session, exerciseIds, date, planIdsByDay, cycle) {
   if (session.dayType && DAY_TYPES.includes(session.dayType)) return session.dayType
 
   let best = null
@@ -174,5 +248,5 @@ function inferDayType(session, exerciseIds, date, planIdsByDay) {
   }
   if (best && bestScore > 0) return best
 
-  return getDayTypeForDate(date, 1)
+  return getDayTypeForDate(date, 1, cycle)
 }

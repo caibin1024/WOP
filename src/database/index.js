@@ -16,7 +16,9 @@ let isInitialized = false
 const isNative = Capacitor.isNativePlatform()
 
 // 建表 SQL
+// 注意：SCHEMA 按半角分号拆分执行，注释里不能出现半角分号
 const SCHEMA = `
+-- 自定义动作（v1.3.0 启用）：内置 44 个动作在 seed.js 内存里，此表只存用户自增的动作
 CREATE TABLE IF NOT EXISTS exercises (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -27,7 +29,10 @@ CREATE TABLE IF NOT EXISTS exercises (
   video_url TEXT DEFAULT '',
   image_asset_path TEXT DEFAULT '',
   common_mistakes TEXT DEFAULT '',
-  tips TEXT DEFAULT ''
+  tips TEXT DEFAULT '',
+  recommended_weight_kg REAL,
+  recommended_seconds INTEGER,
+  special TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workout_day_exercises (
@@ -140,6 +145,12 @@ async function initWebSqlite() {
   const { defineCustomElements } = await import('jeep-sqlite/loader')
   await defineCustomElements(window)
   await customElements.whenDefined('jeep-sqlite')
+  // 插件 initWebStore 是用 querySelector('jeep-sqlite') 取实例的，只注册标签不插进 DOM
+  // 会直接抛 "element is not present in the DOM" → initDatabase 建表/播种全不执行，
+  // 页面表现为"数据全空且刷新无效"（2026-09-30 真实踩坑）。组件 render() 为空，插了也看不见。
+  if (!document.querySelector('jeep-sqlite')) {
+    document.body.appendChild(document.createElement('jeep-sqlite'))
+  }
   await sqlite.initWebStore()
 }
 
@@ -195,6 +206,20 @@ export async function initDatabase() {
       const hasTargetSets = (defCols.values || []).some(c => c.name === 'target_sets')
       if (!hasTargetSets) {
         await db.run('ALTER TABLE exercise_defaults ADD COLUMN target_sets INTEGER')
+      }
+
+      // 迁移：exercises 补自定义动作三列（v1.3.0 启用该表，老库建表时没有这些列）。
+      // 用列存在性检查即可（幂等），纯加列无数据迁移，不需要 app_meta 标记键。
+      const exCols = await db.query('PRAGMA table_info(exercises)')
+      const exColNames = new Set((exCols.values || []).map(c => c.name))
+      if (!exColNames.has('recommended_weight_kg')) {
+        await db.run('ALTER TABLE exercises ADD COLUMN recommended_weight_kg REAL')
+      }
+      if (!exColNames.has('recommended_seconds')) {
+        await db.run('ALTER TABLE exercises ADD COLUMN recommended_seconds INTEGER')
+      }
+      if (!exColNames.has('special')) {
+        await db.run('ALTER TABLE exercises ADD COLUMN special TEXT')
       }
 
       // 迁移：aerobic_logs 增加 distance_km 列（跑步机，v0.2.4；老库升级时补列）。

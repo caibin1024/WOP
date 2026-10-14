@@ -505,6 +505,44 @@ export const TIMED_EXERCISE_IDS = new Set(
   SEED_EXERCISES.filter(e => e.special === 'seconds').map(e => e.id)
 )
 
+// 内置动作 id 集合：导入时防碰撞（文件里的自定义动作不得顶替内置 id）+ store 层"内置不可改删"防御共用
+export const SEED_ID_SET = new Set(SEED_EXERCISES.map(e => e.id))
+
+/**
+ * exercises 表行 → 内存动作对象。
+ * store 加载与导出走同一映射，snake→camel 只在这里发生一次，避免两处字段漂移。
+ */
+export function mapExerciseRow(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    category: r.category,
+    isMachine: !!r.is_machine,
+    targetMuscle: r.target_muscle || '',
+    instructions: r.instructions || '',
+    commonMistakes: r.common_mistakes || '',
+    tips: r.tips || '',
+    recommendedWeightKg: r.recommended_weight_kg ?? null,
+    recommendedSeconds: r.recommended_seconds ?? null,
+    special: r.special || null,
+    videoUrl: r.video_url || '',
+    imageAssetPath: r.image_asset_path || ''
+  }
+}
+
+/**
+ * 用「内置 + 自定义」全量动作重建计时集合。
+ * 为什么原地 clear/add 而不是返回新 Set：export/import/aiCoach 三个模块 import 的是
+ * 同一个 TIMED_EXERCISE_IDS 引用，换对象会让它们手里的旧引用失效；原地重建则消费方零改动。
+ * 必须在自定义动作加载/增删/导入之后调用，否则自定义计时动作会被当成负重动作处理（秒数写进 reps 的语义丢失）。
+ */
+export function syncTimedExerciseIds(allExercises) {
+  TIMED_EXERCISE_IDS.clear()
+  for (const e of allExercises) {
+    if (e.special === 'seconds') TIMED_EXERCISE_IDS.add(e.id)
+  }
+}
+
 // PPL 三分化训练计划
 // dayType: push / pull / legs
 export const SEED_WORKOUT_PLAN = [
@@ -565,26 +603,56 @@ export const PLAN_LABELS = SEED_WORKOUT_PLAN.reduce((acc, day) => {
 
 // PPL 练3休1 循环锚点：2026-08-11 = Push 日（本地时间）
 const SCHEDULE_ANCHOR = new Date(2026, 7, 11)
-// 循环序列（顺序即语义，导出给 stores/training.js 换算"插入休息日"所需偏移，别单独再抄一份）
+// 默认周期（练三休一 PPL）。用户可配置周期（v1.3.0）：存 app_meta.schedule_cycle，
+// 读不到就用这份默认——顺序即语义，导出给 stores/training.js 换算"插入休息日"所需偏移，别单独再抄一份
 export const SCHEDULE_CYCLE = ['push', 'pull', 'legs', 'rest']
+
+// 日型值域：周期槽位只能取这四种（拍板：不开放自定义日型名称/内容）
+export const CYCLE_DAY_TYPES = ['push', 'pull', 'legs', 'rest']
+
+/**
+ * 校验周期配置——store 读取、设置页保存、导入文件三处共用同一判定，别各写一份。
+ * 规则（拍板）：数组、长度 2-14、槽位只在四类型内、至少 1 个休日（顺延要锁休）+ 至少 1 个训练日。
+ */
+export function isValidScheduleCycle(arr) {
+  if (!Array.isArray(arr)) return false
+  if (arr.length < 2 || arr.length > 14) return false
+  if (!arr.every(t => CYCLE_DAY_TYPES.includes(t))) return false
+  if (!arr.includes('rest')) return false
+  if (arr.every(t => t === 'rest')) return false
+  return true
+}
+
+/**
+ * 任意日期在周期里的槽位下标（算术取值，绝不查 indexOf——周期里同类型可重复，
+ * indexOf(日型) 只返回第一个出现位，而顺延换算必须知道真实槽位，否则 restShift 会算错）。
+ * @param {Date|string} date  Date 对象（本地），或本地 YYYY-MM-DD 字符串
+ * @param {number} offsetDays 已顺延的天数（整体后移 offsetDays 天）
+ * @param {string[]} cycle 周期数组（默认 SCHEDULE_CYCLE）
+ */
+export function getCycleIndex(date, offsetDays = 0, cycle = SCHEDULE_CYCLE) {
+  const d = new Date(date) // 统一新建：Date 入参是拷贝（不改调用方对象），字符串入参与旧行为一致
+  d.setHours(0, 0, 0, 0)
+  const diffDays = Math.floor((d - SCHEDULE_ANCHOR) / (24 * 60 * 60 * 1000))
+  const n = cycle.length
+  return (((diffDays - offsetDays) % n) + n) % n
+}
 
 /**
  * 计算任意日期的计划类型
  * @param {Date|string} date  Date 对象（本地），或本地 YYYY-MM-DD 字符串
  * @param {number} offsetDays 已顺延的天数（整体后移 offsetDays 天）
+ * @param {string[]} cycle 周期数组（缺省默认，老调用方零改动）
  */
-export function getDayTypeForDate(date, offsetDays = 0) {
-  const d = date instanceof Date ? date : new Date(date)
-  d.setHours(0, 0, 0, 0)
-  const diffDays = Math.floor((d - SCHEDULE_ANCHOR) / (24 * 60 * 60 * 1000))
-  return SCHEDULE_CYCLE[(((diffDays - offsetDays) % 4) + 4) % 4]
+export function getDayTypeForDate(date, offsetDays = 0, cycle = SCHEDULE_CYCLE) {
+  return cycle[getCycleIndex(date, offsetDays, cycle)]
 }
 
 /**
  * 计算今天对应的 dayType
  */
-export function getTodayDayType(offsetDays = 0) {
-  return getDayTypeForDate(new Date(), offsetDays)
+export function getTodayDayType(offsetDays = 0, cycle = SCHEDULE_CYCLE) {
+  return getDayTypeForDate(new Date(), offsetDays, cycle)
 }
 
 /**

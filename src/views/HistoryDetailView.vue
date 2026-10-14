@@ -26,7 +26,8 @@
             <span class="ex-tag" :class="findExercise(g.exerciseId)?.isMachine ? 'machine' : 'free'">
               {{ findExercise(g.exerciseId)?.isMachine ? '器械' : '自由' }}
             </span>
-            <button class="ex-swap" @click="openSwapPicker(g)" aria-label="更换动作">
+            <!-- 合成卡片（0 组）无记录可换，隐藏入口 -->
+            <button v-if="g.logs.length" class="ex-swap" @click="openSwapPicker(g)" aria-label="更换动作">
               <AppIcon name="exchange" :size="15" />
             </button>
           </div>
@@ -74,8 +75,45 @@
               </div>
             </template>
           </div>
+
+          <!-- 补录新建行：复用行内编辑的输入结构，保存即写库（组号追加） -->
+          <div v-if="isAdding(g.exerciseId)" class="set-row">
+            <div class="set-detail">
+              <span class="set-num">第{{ nextSetNumber(g) }}组</span>
+              <div class="edit-row">
+                <template v-if="isTimedEx(g.exerciseId)">
+                  <input type="number" inputmode="numeric" class="edit-input" v-model.number="editValue" placeholder="秒数">
+                  <span class="edit-unit">秒</span>
+                </template>
+                <template v-else>
+                  <input type="number" inputmode="decimal" class="edit-input" v-model.number="editWeight" placeholder="重量">
+                  <span class="edit-unit">kg</span>
+                  <span class="edit-times">×</span>
+                  <input type="number" inputmode="numeric" class="edit-input" v-model.number="editReps" placeholder="次数">
+                  <span class="edit-unit">次</span>
+                </template>
+                <button class="edit-btn save"
+                        :disabled="saving || !(Number(isTimedEx(g.exerciseId) ? editValue : editReps) > 0)"
+                        @click="saveNewSet(g)">
+                  {{ saving ? '保存中…' : '保存' }}
+                </button>
+                <button class="edit-btn" :disabled="saving" @click="cancelEdit">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 组级补录入口：漏填的组在这里追加 -->
+          <button v-if="!isAdding(g.exerciseId)" class="add-set-btn"
+                  @click="startAdd(g.exerciseId, g.logs[g.logs.length - 1] || null)">
+            <AppIcon name="plus" :size="14" /><span>加一组</span>
+          </button>
         </div>
       </div>
+
+      <!-- 动作级补录入口：整个动作当天漏录时，从面板挑入再加组 -->
+      <button class="add-set-btn" @click="addPicker = true">
+        <AppIcon name="plus" :size="14" /><span>补录动作</span>
+      </button>
     </div>
 
     <!-- 空态 -->
@@ -96,8 +134,20 @@
       @close="swapPicker = null"
     />
 
-    <!-- 浮层/内联态纳入返回键：换动作面板、删除确认、内联编辑 -->
+    <!-- 补录动作选择面板（复用换动作面板，used-ids 含合成组防重复补同一动作） -->
+    <ExercisePickerSheet
+      v-if="addPicker"
+      title="补录动作"
+      :day-label="dayTypeLabel"
+      :exercises="training.allExercises"
+      :used-ids="addUsedIds"
+      @select="onAddSelect"
+      @close="addPicker = false"
+    />
+
+    <!-- 浮层/内联态纳入返回键：换动作面板、补录面板、删除确认、内联编辑（含补录新建行） -->
     <BackLayer :show="!!swapPicker" @back="swapPicker = null" />
+    <BackLayer :show="addPicker" @back="addPicker = false" />
     <BackLayer :show="!!deleteArmId" @back="deleteArmId = ''" />
     <BackLayer :show="editingId !== ''" @back="cancelEdit" />
   </div>
@@ -130,10 +180,15 @@ const groups = computed(() => {
     }
     byEx[log.exerciseId].push(log)
   }
+  // 动作级补录：新建态但该动作当日无记录 → 追加合成卡片（logs:[]），
+  // 让补录行有落点。append 到末尾、不动首组，dayTypeLabel/totalSets 均不受影响
+  const pendingEx = editingId.value.startsWith('new:') ? editingId.value.slice(4) : ''
+  if (pendingEx && !byEx[pendingEx]) order.push(pendingEx)
   return order.map(id => ({
     exerciseId: id,
-    name: byEx[id][0].exerciseName,
-    logs: byEx[id].slice().sort((a, b) => a.setNumber - b.setNumber)
+    // 合成组 logs 为空走兜底链；正常组第一项恒命中，行为不变
+    name: byEx[id]?.[0]?.exerciseName || findExercise(id)?.name || id,
+    logs: (byEx[id] || []).slice().sort((a, b) => a.setNumber - b.setNumber)
   }))
 })
 
@@ -149,8 +204,11 @@ const dayTypeLabel = computed(() => {
 function findExercise(exId) {
   return training.allExercises.find(e => e.id === exId)
 }
+function isTimedEx(exId) {
+  return findExercise(exId)?.special === 'seconds'
+}
 function isTimedLog(log) {
-  return findExercise(log.exerciseId)?.special === 'seconds'
+  return isTimedEx(log.exerciseId)
 }
 
 // 强度文案：计时动作「46 秒」；有重量「10kg × 12」；自重「12 次」
@@ -185,6 +243,43 @@ async function saveEdit(log) {
 }
 function cancelEdit() { editingId.value = '' }
 
+// 补录新组（组级：卡片末尾「加一组」；动作级：底部面板选入后落到合成卡片）
+// 复用 editingId 哨兵 'new:'+exerciseId：单变量与行内编辑结构性互斥，
+// 且现有 BackLayer(show="editingId !== ''") 天然覆盖新建行，返回键零新增
+const saving = ref(false)
+function isAdding(exId) { return editingId.value === 'new:' + exId }
+function nextSetNumber(g) { return g.logs.reduce((m, l) => Math.max(m, l.setNumber), 0) + 1 }
+
+function startAdd(exerciseId, prevLog = null) {
+  editingId.value = 'new:' + exerciseId // 覆盖即自动取消行内编辑/上一个新建态
+  if (isTimedEx(exerciseId)) {
+    editValue.value = prevLog?.reps ?? null
+  } else {
+    // 沿用上一组的值（照今日页 addSet 范式）；动作级无上一组则空值起步
+    editWeight.value = prevLog?.weightKg ?? null
+    editReps.value = prevLog?.reps ?? null
+  }
+}
+
+async function saveNewSet(g) {
+  if (saving.value) return // 防连点：表无唯一约束，重复插入无法自动去重
+  const timed = isTimedEx(g.exerciseId)
+  const reps = timed ? editValue.value : editReps.value
+  // 次数/秒数必须 >0：空值直存会插入「0 次」脏组；重量允许 0（=自重）。
+  // 有意比 saveEdit 严（既有编辑流靠已录数据兜底，补录没有），按钮 disabled 之外的第二道闸
+  if (!reps || reps <= 0) return
+  saving.value = true
+  try {
+    await training.addLogSet(date.value, g.exerciseId, {
+      weightKg: timed ? 0 : (editWeight.value || 0),
+      reps
+    })
+    cancelEdit() // addLogSet 内部已 reload，groups 自动重算
+  } finally {
+    saving.value = false
+  }
+}
+
 // 删除（二次确认）
 const deleteArmId = ref('')
 async function confirmDelete(logId) {
@@ -195,6 +290,9 @@ async function confirmDelete(logId) {
 // 更换动作（整组批量换，针对"记错动作/动作库新增"的更正场景）
 const swapPicker = ref(null) // { exerciseId, name, count }
 function openSwapPicker(g) {
+  // 换动作会批量改该动作的 exercise_id：若此时还有补录新建态挂着，
+  // pending 卡片的 id 会被一起改掉、与真实卡片错位——先取消再开面板
+  if (editingId.value.startsWith('new:')) cancelEdit()
   swapPicker.value = { exerciseId: g.exerciseId, name: g.name, count: g.logs.length }
 }
 // 该日其它分组的动作置灰（沿用 picker「已在该日」语义），避免误合并
@@ -218,6 +316,15 @@ async function onSwapSelect(newId) {
   } catch (e) {
     alert('操作失败：' + (e?.message || String(e)))
   }
+}
+
+// 动作级补录：整段动作当天漏录时从面板挑入
+const addPicker = ref(false)
+// 该日已有动作（含补录中的合成组）置灰，防止同一动作补出第二张卡
+const addUsedIds = computed(() => new Set(groups.value.map(g => g.exerciseId)))
+function onAddSelect(exId) {
+  addPicker.value = false
+  startAdd(exId) // 无上一组可沿用，空值起步
 }
 
 function formatDate(dateStr) {
@@ -472,5 +579,30 @@ onMounted(async () => {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
+}
+.edit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* 补录入口：与今日页「加一组」同款虚线按钮（那边是 scoped，这里自带一份） */
+.add-set-btn {
+  margin-top: 10px;
+  width: 100%;
+  min-height: 44px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s var(--easing);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.add-set-btn:active {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 </style>

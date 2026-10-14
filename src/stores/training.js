@@ -2,16 +2,19 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { App } from '@capacitor/app'
-import { initDatabase, query, run, genId, todayStr } from '../database'
+import { initDatabase, query, run, runInTransaction, withTransaction, genId, todayStr } from '../database'
 import {
   getTodayDayType as seedGetTodayDayType,
   getDayTypeForDate as seedGetDayTypeForDate,
+  getCycleIndex as seedGetCycleIndex,
+  isValidScheduleCycle,
   SEED_EXERCISES,
+  SEED_ID_SET,
+  syncTimedExerciseIds,
+  mapExerciseRow,
   SCHEDULE_CYCLE
 } from '../database/seed'
-
-// rest 在练三休一循环里的下标：顺延要把某一天锁成休息日，需要按它反推偏移增量
-const REST_INDEX = SCHEDULE_CYCLE.indexOf('rest')
+import { EXERCISE_CATEGORIES } from '../models'
 
 /**
  * 训练数据 Store
@@ -22,6 +25,7 @@ export const useTrainingStore = defineStore('training', () => {
   const baselineOffset = ref(1)                    // 练三休一计划基线偏移（迁移自 schedule_offset_days，顺延不再改它）
   const scheduleChanges = ref([])                  // 顺延时间线：[{ date, offset }]，从 date 起有效偏移变为 offset
   const undoStack = ref([])                        // 顺延前的排期快照栈（撤销用：每次顺延压一版，撤销弹一版）
+  const scheduleCycle = ref([...SCHEDULE_CYCLE])   // 训练周期（v1.3.0 可配置），读不到 app_meta 时默认 4 槽
   const scheduleLoaded = ref(false)                // 是否已从 DB 读取偏移
   const missStartDate = ref(todayStr())             // 漏练判断起始日（安装后开始，可调整）
   const todayExercises = ref([])        // 今日动作列表（含目标组数）
@@ -50,6 +54,8 @@ export const useTrainingStore = defineStore('training', () => {
         await initDatabase()
         await loadScheduleOffset()
         await loadMissStart()
+        // 自定义动作必须先于 loadPlan：join 找不到的动作会被静默丢出计划槽位
+        await loadCustomExercises()
         await loadPlan()
         await refreshToday()
         await loadHistory()
@@ -107,6 +113,16 @@ export const useTrainingStore = defineStore('training', () => {
       undoStack.value = rows.length ? parseUndoStack(rows[0].value) : []
     } catch (e) {
       // 读不到快照 = 没有可撤销的顺延（老库无此键，不会显示撤销按钮）
+    }
+    // 训练周期：读默认值语义（读不到/非法 → 默认 4 槽），镜像 ai_provider，老库零迁移
+    try {
+      const rows = await query("SELECT value FROM app_meta WHERE key = 'schedule_cycle'", [])
+      if (rows.length) {
+        const parsed = JSON.parse(rows[0].value)
+        if (isValidScheduleCycle(parsed)) scheduleCycle.value = [...parsed]
+      }
+    } catch (e) {
+      // 解析失败保持默认周期
     }
     scheduleLoaded.value = true
   }
@@ -200,7 +216,116 @@ export const useTrainingStore = defineStore('training', () => {
     }
     const offset = offsetOverride != null ? offsetOverride : effectiveOffsetFor(dateStr)
     const [y, m, d] = dateStr.split('-').map(Number)
-    return seedGetDayTypeForDate(new Date(y, m - 1, d), offset)
+    // 必须带当前周期：漏传会让日历走新周期、今日页走旧周期（两处分叉点之一，另一处是 refreshToday）
+    return seedGetDayTypeForDate(new Date(y, m - 1, d), offset, scheduleCycle.value)
+  }
+
+  /**
+   * 预览：改周期并重置顺延后"今天"会变成什么日型（只算不写，供设置页确认框展示）。
+   * 今天已练则日志优先、日型不变——与 getDayTypeForDate 的覆盖语义一致。
+   */
+  function previewTodayDayType(cycle) {
+    if (!isValidScheduleCycle(cycle)) return null
+    const logs = historyByDate.value[todayStr()]
+    if (logs?.length) return logs[0].dayType
+    return seedGetTodayDayType(baselineOffset.value, cycle)
+  }
+
+  /**
+   * 加载自定义动作（exercises 表，v1.3.0 起启用；表里有 = 自定义，内置 44 个永远只在 SEED 里）。
+   * allExercises = 内置 + 自定义，动作库页/详情页/选动作面板/计划 join 全部从它取数。
+   * 必须在 loadPlan 之前调用，且增删改之后都要重调（loadPlan 的 join 与今日页缓存都吃 allExercises）。
+   */
+  async function loadCustomExercises() {
+    const rows = await query('SELECT * FROM exercises ORDER BY name', [])
+    allExercises.value = [...SEED_EXERCISES, ...rows.map(mapExerciseRow)]
+    // 计时集合跟着全量动作走：自定义计时动作要进导出/AI/导入的 seconds 判断
+    syncTimedExerciseIds(allExercises.value)
+  }
+
+  /** 自定义动作表单归一化 + 校验（内置不可改删由 UI 隐藏入口 + SEED_ID_SET 双保险拦截） */
+  function normalizeCustomExercise(p) {
+    const name = String(p.name || '').trim()
+    if (!name) throw new Error('动作名称不能为空')
+    const category = String(p.category || '')
+    if (!Object.values(EXERCISE_CATEGORIES).includes(category)) throw new Error('动作分类不合法')
+    const seconds = Math.round(Number(p.recommendedSeconds) || 0)
+    if (seconds < 0 || seconds > 3600) throw new Error('建议秒数不合法')
+    // 计时语义：填了建议秒数即计时动作（special 只有 'seconds' 一种取值），计时动作不带建议重量
+    const special = seconds > 0 ? 'seconds' : null
+    let weight = null
+    if (!special && p.recommendedWeightKg !== '' && p.recommendedWeightKg != null) {
+      weight = Number(p.recommendedWeightKg)
+      if (!Number.isFinite(weight) || weight < 0) throw new Error('建议重量不合法')
+    }
+    return {
+      name,
+      category,
+      isMachine: p.isMachine ? 1 : 0,
+      targetMuscle: String(p.targetMuscle || '').trim(),
+      instructions: String(p.instructions || ''),
+      commonMistakes: String(p.commonMistakes || ''),
+      tips: String(p.tips || ''),
+      videoUrl: String(p.videoUrl || ''),
+      imageAssetPath: String(p.imageAssetPath || ''),
+      recommendedWeightKg: weight,
+      recommendedSeconds: special ? seconds : null,
+      special
+    }
+  }
+
+  /** 新增自定义动作（id 用 genId，与内置 kebab id 天然不冲突） */
+  async function createCustomExercise(payload) {
+    const v = normalizeCustomExercise(payload)
+    const id = genId()
+    await run(
+      `INSERT INTO exercises (id, name, category, is_machine, target_muscle, instructions, video_url, image_asset_path, common_mistakes, tips, recommended_weight_kg, recommended_seconds, special)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, v.name, v.category, v.isMachine, v.targetMuscle, v.instructions, v.videoUrl,
+       v.imageAssetPath, v.commonMistakes, v.tips, v.recommendedWeightKg, v.recommendedSeconds, v.special]
+    )
+    await loadCustomExercises()
+    await reloadPlanAndToday()
+    return id
+  }
+
+  /** 编辑自定义动作（内置 id 直接拒绝；已有训练记录时计时设置锁定） */
+  async function updateCustomExercise(id, payload) {
+    if (SEED_ID_SET.has(id)) throw new Error('内置动作不可编辑')
+    const v = normalizeCustomExercise(payload)
+    const cur = await query('SELECT special FROM exercises WHERE id = ?', [id])
+    if (!cur.length) throw new Error('动作不存在或已删除')
+    // 计时开关翻转会让历史 reps（存的秒）按次数解释，不可逆，故有记录时锁定
+    const curSpecial = cur[0].special || null
+    if (curSpecial !== v.special) {
+      const logs = await query('SELECT 1 FROM training_logs WHERE exercise_id = ? LIMIT 1', [id])
+      if (logs.length) throw new Error('该动作已有训练记录，计时设置不可更改')
+    }
+    await run(
+      `UPDATE exercises SET name = ?, category = ?, is_machine = ?, target_muscle = ?, instructions = ?,
+       video_url = ?, image_asset_path = ?, common_mistakes = ?, tips = ?,
+       recommended_weight_kg = ?, recommended_seconds = ?, special = ? WHERE id = ?`,
+      [v.name, v.category, v.isMachine, v.targetMuscle, v.instructions, v.videoUrl,
+       v.imageAssetPath, v.commonMistakes, v.tips, v.recommendedWeightKg, v.recommendedSeconds, v.special, id]
+    )
+    await loadCustomExercises()
+    await reloadPlanAndToday()
+  }
+
+  /**
+   * 删除自定义动作：只断引用（计划槽位 / 默认值 / 今日草稿），训练记录一律不碰——
+   * 行内有 exercise_name 快照，历史页展示不受影响（拍板决策）。
+   */
+  async function removeCustomExercise(id) {
+    if (SEED_ID_SET.has(id)) throw new Error('内置动作不可删除')
+    await withTransaction(async () => {
+      await runInTransaction('DELETE FROM exercises WHERE id = ?', [id])
+      await runInTransaction('DELETE FROM workout_day_exercises WHERE exercise_id = ?', [id])
+      await runInTransaction('DELETE FROM exercise_defaults WHERE exercise_id = ?', [id])
+      await runInTransaction('DELETE FROM training_draft WHERE exercise_id = ?', [id])
+    })
+    await loadCustomExercises()
+    await reloadPlanAndToday()
   }
 
   /**
@@ -235,7 +360,7 @@ export const useTrainingStore = defineStore('training', () => {
    * 计划以 workout_day_exercises 表为准（设置页可自定义），由 planByDay 供数。
    */
   async function refreshToday() {
-    todayDayType.value = seedGetTodayDayType(effectiveOffsetFor(todayStr()))
+    todayDayType.value = seedGetTodayDayType(effectiveOffsetFor(todayStr()), scheduleCycle.value)
     const dayPlan = planByDay.value[todayDayType.value] || []
     todayExercises.value = dayPlan.map((w, i) => ({ ...w, sortOrder: i }))
     await loadTodayLogs()
@@ -416,11 +541,13 @@ export const useTrainingStore = defineStore('training', () => {
    */
   const postponeInsertDate = computed(() => {
     let d = postponeStartDate.value
-    for (let i = 0; i < 7; i++) {
+    // 上界 = 周期长度：校验保证周期内至少 1 个训练日，N 天内必命中（自定义周期可能连休 N-1 天）
+    const max = scheduleCycle.value.length
+    for (let i = 0; i < max; i++) {
       if (getDayTypeForDate(d) !== 'rest') return d
       d = shiftDate(d, 1)
     }
-    return postponeStartDate.value // 理论上到不了（练三休一最多连休 1 天）
+    return postponeStartDate.value // 理论上到不了（校验保证周期内至少 1 个训练日）
   })
 
   /** 是否有可撤销的顺延（撤销栈非空） */
@@ -453,16 +580,20 @@ export const useTrainingStore = defineStore('training', () => {
    * 若插入日前一天是训练日（比如昨天刚练 Push），插入日就变成 Push —— 而 Push 昨天已经练完，
    * 用户等于重练一天，真正该练的日型被顶掉。所以插入日必须显式锁成 rest。
    *
-   * 偏移与日型的换算（见 seed.js getDayTypeForDate）：type(d, offset) = CYCLE[(diffDays(d) - offset) % 4]。
-   * 插入日当前日型在循环里的下标记作 i，偏移增量加 k 后下标变为 (i - k) % 4，
-   * 要落到 rest（下标 REST_INDEX）即 k = (i - REST_INDEX + 4) % 4。
+   * 偏移与日型的换算（见 seed.js getDayTypeForDate）：type(d, offset) = cycle[(diffDays(d) - offset) % N]。
+   * 插入日当前槽位下标记作 idx（必须算术取值见 getCycleIndex——周期里同类型可重复，
+   * indexOf(日型) 只返回第一个出现位，按它反推会把插入日锁不到休日上），偏移增量加 k 后
+   * 下标变为 (idx - k) % N，要落到 rest（下标 restIdx = cycle.indexOf('rest')）即 k = (idx - restIdx + N) % N。
    */
   async function postponeSchedule() {
     const start = postponeInsertDate.value
     const next = shiftDate(start, 1)
     const base = effectiveOffsetFor(start)
-    const idx = SCHEDULE_CYCLE.indexOf(getDayTypeForDate(start, base))
-    const restShift = ((idx - REST_INDEX) % 4 + 4) % 4
+    const cycle = scheduleCycle.value
+    const n = cycle.length
+    const idx = seedGetCycleIndex(start, base, cycle)
+    const restIdx = cycle.indexOf('rest')
+    const restShift = ((idx - restIdx) % n + n) % n
     const list = scheduleChanges.value
       // 同日重复顺延以最后一次为准：先摘掉与新写入两条同日的旧点，避免同一日期堆多条 change point
       .filter(c => c.date !== start && c.date !== next)
@@ -473,6 +604,37 @@ export const useTrainingStore = defineStore('training', () => {
       // 三路比较：两路比较在日期相同时会返回 1，可能把同日多条 change point 的顺序打乱
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     await commitScheduleChanges(list, [...undoStack.value, scheduleChanges.value])
+  }
+
+  /**
+   * 保存训练周期：校验 → 同一事务写三键（新 cycle / 清空顺延时间线 / 清空撤销栈）→ 成功后更新内存并刷新。
+   * 为什么三键必须同事务：旧时间线的整数偏移是按旧周期长度换算的，新周期下会被重新解释——
+   * 未执行的过去日期日型被追溯改写、未来顺延点错位（时间旅行）。改周期即重置是拍板语义。
+   * 已执行日不受影响（getDayTypeForDate 的日志覆盖优先）。
+   */
+  async function setScheduleCycle(next) {
+    if (!isValidScheduleCycle(next)) {
+      throw new Error('周期不合法：长度 2-14 天，只含推/拉/腿/休，且至少 1 个休日与 1 个训练日')
+    }
+    const value = JSON.stringify([...next])
+    await withTransaction(async () => {
+      await runInTransaction(
+        "INSERT INTO app_meta (key, value) VALUES ('schedule_cycle', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [value]
+      )
+      await runInTransaction(
+        "INSERT INTO app_meta (key, value) VALUES ('schedule_changes', '[]') ON CONFLICT(key) DO UPDATE SET value = '[]'",
+        []
+      )
+      await runInTransaction(
+        "INSERT INTO app_meta (key, value) VALUES ('schedule_changes_undo', '[]') ON CONFLICT(key) DO UPDATE SET value = '[]'",
+        []
+      )
+    })
+    scheduleCycle.value = [...next]
+    scheduleChanges.value = []
+    undoStack.value = []
+    await refreshToday()
   }
 
   /**
@@ -502,6 +664,32 @@ export const useTrainingStore = defineStore('training', () => {
       await loadTodayLogs()
     }
     await loadHistory()
+  }
+
+  /**
+   * 补录一组（历史详情页）：调用方只给"哪天、哪个动作、多少重量/次数"，
+   * 组号/日型/动作名快照在这里统一推导，避免各补录入口各自拼参拼错。
+   *
+   * 组号 = 该日该动作已录最大组号 + 1（追加式，不回填中间空洞）：
+   * 表没有 UNIQUE(date, exercise_id, set_number)，填洞没有防冲突兜底；
+   * 且与今日页 addSet 的 max+1 行为一致，组号只是展示序号，不影响任何统计。
+   * 从 historyByDate 内存算而非 SQL 现查——与详情页 groups 同源，
+   * 页面能看到的组和算出的组号严格自洽（LIMIT 3000 窗口外的日期页面本身也进不去）。
+   *
+   * 执行复用 logSet：它的 INSERT 与"今日 loadTodayLogs、总是 loadHistory"的
+   * 重载语义已对齐（补录今天会推高 hasTodayLog，让今日页切完成态，
+   * 与 saveAllToday 结构性互斥、组号不可能冲突），不再复制一份 INSERT。
+   */
+  async function addLogSet(date, exerciseId, { weightKg = 0, reps = 0 } = {}) {
+    const exLogs = (historyByDate.value[date] || []).filter(l => l.exerciseId === exerciseId)
+    const setNumber = exLogs.reduce((m, l) => Math.max(m, l.setNumber), 0) + 1
+    const dayType = getDayTypeForDate(date) // 内部自带"已有日志 dayType 优先，否则按周期+顺延算"
+    // 动作被删也要能补录：快照名兜底链，与既有"动作已删按快照显示"行为一致
+    const exerciseName = exLogs[0]?.exerciseName
+      || allExercises.value.find(e => e.id === exerciseId)?.name
+      || exerciseId
+    // done 必须 true：AI 概览/历史最佳/上次表现全部 WHERE done=1，漏写会被统计完全忽略
+    await logSet({ date, dayType, exerciseId, exerciseName, setNumber, weightKg, reps, done: true })
   }
 
   /**
@@ -801,6 +989,10 @@ export const useTrainingStore = defineStore('training', () => {
     historyByDate,
     allExercises,
     planByDay,
+    loadCustomExercises,
+    createCustomExercise,
+    updateCustomExercise,
+    removeCustomExercise,
     loadPlan,
     refreshToday,
     swapPlanExercise,
@@ -813,11 +1005,15 @@ export const useTrainingStore = defineStore('training', () => {
     hasTodayLog,
     init,
     loadScheduleOffset,
+    scheduleCycle,
+    setScheduleCycle,
+    previewTodayDayType,
     postponeSchedule,
     undoPostpone,
     canUndoPostpone,
     getDayTypeForDate,
     logSet,
+    addLogSet,
     saveAllToday,
     getExerciseDefault,
     saveExerciseDefault,
