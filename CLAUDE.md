@@ -1,7 +1,7 @@
 # CLAUDE.md — WOP 健身 App 项目须知
 
 > 供 AI 助手（及新接手的人）快速上手。改代码前请先读完「已知坑与地雷」一节。
-> 最后更新：2026-10-13（v1.3.0：自增动作库 + 可配置训练周期 + 训练日志补录；2026-09-30 含 v1.2.0 未发版修复：web 端 jeep-sqlite 初始化）
+> 最后更新：2026-10-15（v1.4.0：首次启动配置引导 + web 端 jeep-sqlite 持久化修复；2026-10-13 v1.3.0：自增动作库 + 可配置训练周期 + 训练日志补录；2026-09-30 含 v1.2.0 未发版修复：web 端 jeep-sqlite 初始化）
 
 ## 项目是什么
 
@@ -71,7 +71,7 @@ cp android/app/build/outputs/apk/debug/app-debug.apk WOP-v<版本号>.apk
 ```
 src/
   views/        页面：Today / History(+Detail) / ExerciseList(+Detail) / Aerobic / Body / Settings / AiConsult
-  components/   AppIcon、BackLayer、CalendarCard、ExercisePickerSheet、ExerciseFormSheet、CycleEditorSheet、ProgressChart
+  components/   AppIcon、BackLayer、CalendarCard、ExercisePickerSheet、ExerciseFormSheet、CycleEditorSheet、OnboardingWizard、ProgressChart
   stores/       Pinia：training / aerobic / body / profile / ai / theme
   database/     index.js（建表 + 迁移 + query/run）、seed.js（动作库 + 预置计划 + 调度算法）
   services/     aiCoach.js（提示词 + 双供应商调用，`AI_PROVIDERS` 配置表）、exportData.js、importData.js
@@ -79,6 +79,8 @@ src/
   models/       index.js（仅剩 EXERCISE_CATEGORIES / MUSCLE_GROUP_LABELS 等常量）
 android/        Capacitor Android 工程（MainActivity.java 之外基本不用动）
 ```
+
+**App.vue 启动状态机（v1.4.0）**：`wizardPhase: 'checking' | 'show' | 'done'`——checking 时显示极简 loading，show 时挂 `OnboardingWizard`（此时 `router-view` 与 `bottom-nav` **都不挂载**），done 后永不回 show。首启检测读 `app_meta.onboarded`（query 内部自会 initDatabase，迁移先跑完）；DB 异常放行 done，引导不是启动链路单点。**该结构依赖 `training.init()` 的 initPromise 幂等**：向导内部先 init，finish 后 TodayView 首挂载复用同一 Promise，别把 init 改成非幂等。重看引导不走这里——设置页「版本」组自挂 `OnboardingWizard(mode="reenter")`，不动本状态机。
 
 **无入口的后端**：所有"服务端逻辑"都在前端 + SQLite 里。没有 API 服务器。
 
@@ -95,7 +97,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 | `body_records` | 体重 / BMI / 体脂 |
 | `aerobic_logs` | 有氧，`type` ∈ `swim` / `stair` / `treadmill` / `bike` |
 | `exercise_defaults` | 每个动作的默认重量/次数/秒数/组数 |
-| `app_meta` | 键值表：计划偏移（`schedule_offset_days` 基线）、顺延时间线（`schedule_changes`）、顺延撤销快照栈（`schedule_changes_undo`）、**训练周期（`schedule_cycle`，JSON 数组，v1.3.0——与 `ai_provider` 同为"读默认值"语义：读不到/`isValidScheduleCycle` 不过就当默认 4 槽，零迁移）**、漏练起始日、个人资料、AI 供应商选择（`ai_provider`）、两把 AI Key（`deepseek_api_key` / `mimo_api_key`）、AI 长期记忆、迁移标记。**AI 这三键是"读默认值"语义（读不到 `ai_provider` 就当 deepseek），无迁移** |
+| `app_meta` | 键值表：计划偏移（`schedule_offset_days` 基线）、顺延时间线（`schedule_changes`）、顺延撤销快照栈（`schedule_changes_undo`）、**训练周期（`schedule_cycle`，JSON 数组，v1.3.0——与 `ai_provider` 同为"读默认值"语义：读不到/`isValidScheduleCycle` 不过就当默认 4 槽，零迁移）**、漏练起始日、个人资料、**首启引导标记（`onboarded`，v1.4.0：'1'=已引导，读不到/非 '1' 就弹引导——设备本地身份，不进导出/导入，清库也不清它）**、AI 供应商选择（`ai_provider`）、两把 AI Key（`deepseek_api_key` / `mimo_api_key`）、AI 长期记忆、迁移标记。**AI 这三键是"读默认值"语义（读不到 `ai_provider` 就当 deepseek），无迁移** |
 | `ai_messages` | AI 会话滚动窗口 |
 | `ai_consult_records` | AI 咨询记录列表（独立于会话，折叠记忆时不丢） |
 
@@ -104,6 +106,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 1. **迁移必须只跑一次**，用 `app_meta` 里的标记键守卫（如 `migration_plan_boost_v1`）。
    **绝对不要**用"表里有没有这条数据"来判断要不要补——用户主动删除后会被当成"缺失"补回来。
    （历史上真出过这个 bug：设置页删掉的动作每次启动又出现。）
+   **唯一例外是被标记键守卫的「一次性身份判定」**：`migration_onboard_v1` 用"training_logs/body_records/aerobic_logs 任一有行"判老用户（写 `onboarded='1'`，升级不弹引导）——它只在标记键缺失时跑一次，写完标记后永不重跑，与上面禁止的**持续性**存在性补种子语义不同，别互相套用。且不能拿首装就被种子写入的表（workout_day_exercises / profile_* / exercise_defaults）当判据。
 2. 加列用 `PRAGMA table_info` 检查后 `ALTER TABLE ADD COLUMN`（见 `initDatabase` 既有写法）。
 3. `initDatabase()` 有 `isInitialized` 短路 + `dbInitPromise` 并发去重，**首次会话才跑建表和迁移**。
 4. 建表/迁移内部必须用**本地 `db` 对象**（`db.run(...)`），不能调模块级 `run()`——会重入 `initDatabase`。
@@ -147,6 +150,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
   ① `initWebSqlite` 必须把 `<jeep-sqlite>` **插进 DOM**——插件 `initWebStore` 是用 `querySelector` 取实例的，只 `defineCustomElements` 注册标签会抛 "element is not present in the DOM"；
   ② `public/assets/sql-wasm.wasm` 必须存在，**且必须是 jeep-sqlite 构建时锁定的 sql.js 版本**——包本身不带 wasm（只在构建时拷进未发布的 `www/assets`），但 emscripten 胶水已**内置死**在 `dist/esm` 里：拿本项目 `node_modules/sql.js` 的 wasm（依赖声明 `^1.11.0`，实际会被解析到最新 1.14.1）会报 `LinkError: Import #34 ... requires a callable`，页面卡"加载中"。
   缺任一个或版本不配 → `initDatabase` 全程走不通 → 所有 store 加载失败 → 页面表现像"什么数据都没有"或一直加载中，**其实手机端和浏览器存量数据都完好**。**jeep-sqlite 2.8.0 配 `sql.js@1.11.0`**（其 gitHead 的 package-lock 实证；1.11.0 的 wasm 已拷入 `public/assets/` 并随仓库提交，别用 `npm update` 后的新版覆盖）。该 wasm 会随 dist 进 APK（native 原生 SQLite 根本不加载它，纯死重，暂不处理）。
+- **Web 端 jeep-sqlite 默认不回写 IndexedDB，`autosave` 别关**（2026-10-15 踩坑）：插件 `autoSave` 默认 false——写入只进内存 sql.js，store 里永远只有 `open()` 时塞的**空库骨架**（`setInitialDBToStore`），表现为【刷新 = 恢复出厂】：建表/种子/迁移全部重跑、日志清零（表象是"引导页完成、刷新后又弹"）。`initWebSqlite` 已给 `<jeep-sqlite>` 设 `autosave="true"`（run/execute 收尾自动整库回写）；且 jeep-sqlite 的 `commitTransaction()` 不触发 autosave、事务期间 run/execute 又因 `isTransactionActive` 跳过——所以 `withTransaction` 在提交后还要显式 `sqlite.saveToStore(DB_NAME)`（失败仅 console.warn 不翻案：事务已提交，别把成功改成抛错）。这两处删掉任一处 → web 端数据只活一个页面生命周期。Android 原生不受影响（真 SQLite 文件）。
 
 ### Capacitor / Android
 
@@ -181,6 +185,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 ### 前端 / Vue
 
 - **模板里只能引用 store 已经 `return` 出去的属性**。引用未导出的属性构建期不报错（生产模式静默返回 `undefined`），但一旦取它的子属性（`.length` 之类）就会在渲染时抛错；**而 `CalendarCard.vue` 的日历网格和底部弹窗属于同一个组件、同一个 render 函数 —— 弹窗模板抛错，整块日历卡片一起消失**（历史上真发生过：长按日历后整个日历组件不见了，只剩训练记录）。改 store 的导出面时务必同步检查模板；往这个弹窗里加东西要格外保守（只引用已导出属性、别写复杂表达式）。
+- **CSS 变量以 `src/styles/main.css` 为准，没有 `--bg`**（只有 `--bg-base` / `--bg-deep` / `--bg-elevated`）。`var(--bg)` 引用不存在的变量**不报错、静默按透明处理**——全屏浮层写了它就是透明底：首启模式底下恰好只有 body 看不出来，重进/叠加模式直接透穿背后的页面（v1.4.0 的 `OnboardingWizard` 真踩过：`mode="reenter"` 挂在设置页上整个透穿）。全屏层背景对齐 body：`--bg-base` + 同款 radial/linear 渐变。
 
 ### 工具链
 
@@ -199,4 +204,4 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 
 > 已修（v1.3.0）：`exercises` 表已启用为自定义动作存储（自增动作库），不再是死表；`confirmClear` 也**不清**它（自定义动作 = 配置，清了会造孤儿计划槽位）。
 > 已修（v1.1.2）：`confirmClear()` 现在会连带删掉 `app_meta` 的 `ai_memory`。
-> 注意「清空全部数据」**不清** `app_meta`：顺延时间线 / 撤销快照 / 漏练起始日 / 计划偏移 / 训练周期都属于排期配置，不在清理范围内（与既有行为一致）。
+> 注意「清空全部数据」**不清** `app_meta`：顺延时间线 / 撤销快照 / 漏练起始日 / 计划偏移 / 训练周期 / `onboarded` 都属于配置与设备身份，不在清理范围内（与既有行为一致）。**清库 ≠ 恢复出厂：首启引导不会重弹**，想重看走设置页「版本」组的「重新查看配置引导」。

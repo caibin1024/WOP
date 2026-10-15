@@ -16,6 +16,9 @@
 
 ## 功能
 
+### 首次配置引导
+安装后首次打开会进入**三步配置引导**：①填个人资料（身高 / 年龄 / 性别 / 目标 / 优先级，可选填体重）→ ②选训练周期（练三休一 / 练一休一 / 练三休二 / 自定义排布）→ ③配计划动作（三日动作清单可增删）。每步可整体**跳过**——跳过视为已引导，之后不再自动弹出，未配置项维持默认值；也可直接点「下一步」保留默认值继续。设置页「版本」组可随时**重新查看配置引导**，已填的值会预填当前值。
+
 ### 今日训练
 按训练周期自动算出今天该练什么，逐组记录重量 / 次数。默认周期是练三休一（Push 推日 → Pull 拉日 → Legs 腿核日 → 休息日），**周期可在设置页自定义**（见「设置」）。支持手动加组、长按删组，输入内容实时落草稿库防闪退丢失，点「完成今日训练」后归档。休息日提示做有氧。
 
@@ -50,7 +53,7 @@
 需自备所选服务商的 API Key（设置页填写，仅存本机）：DeepSeek 填 `sk-` key，小米 Token Plan 填 `tp-` key——**两家各存各的，来回切换不丢**。选中哪家都只需填 key，接口地址与模型（小米端为 `mimo-v2.6-flash`）已自动内置、无需配置。切换供应商不会清空当前会话与记忆（两家接口兼容，历史可续读）。
 
 ### 设置
-训练计划自定义（换 / 增删 / 排序动作，配置组数、次数、重量）、**训练周期自定义**、AI 服务商切换与 Key、数据导出 / 导入 / 清库、主题外观、个人资料。
+训练计划自定义（换 / 增删 / 排序动作，配置组数、次数、重量）、**训练周期自定义**、AI 服务商切换与 Key、数据导出 / 导入 / 清库、主题外观、个人资料，以及**重新查看配置引导**（「版本」组）。
 
 **训练周期**：日型只有推 / 拉 / 腿 / 休四种，可调整周期长度（2-14 天）并自由往周期里排日型，同类型可出现多次（如 推·休·拉·休·腿·休·休），至少保证 1 个休息日。**修改周期会重置顺延时间线与撤销记录**（保存前会弹确认，并预览"保存后今天将变为哪天"）；已有的训练记录不受影响。
 
@@ -92,7 +95,7 @@ cd android && JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-21.0.12.101-hotsp
 ```
 src/
   views/        页面：Today / History(+Detail) / ExerciseList(+Detail) / Aerobic / Body / AiConsult / Settings
-  components/   AppIcon、BackLayer、CalendarCard、ExercisePickerSheet、ExerciseFormSheet、CycleEditorSheet、ProgressChart
+  components/   AppIcon、BackLayer、CalendarCard、ExercisePickerSheet、ExerciseFormSheet、CycleEditorSheet、OnboardingWizard、ProgressChart
   stores/       Pinia：training / aerobic / body / profile / ai / theme
   database/     index.js（建表 + 迁移 + query/run）、seed.js（动作库 + 预置计划 + 训练日算法）
   services/     aiCoach.js（提示词 + DeepSeek 调用）、exportData.js、importData.js

@@ -297,6 +297,11 @@
           <AppIcon name="chevron-down" :size="18" class="row-chevron" :class="{ open: openGroups.about }" />
         </button>
         <div v-show="openGroups.about" class="setting-body">
+          <button class="btn" @click="reenterOpen = true">
+            <AppIcon name="teach" :size="18" />
+            <span>重新查看配置引导</span>
+          </button>
+          <p class="settings-note">三步引导可随时重看；已填的值会预填当前值，只有点「下一步」才写库。</p>
           <p class="settings-note">
             当前版本 WOP v{{ APP_VERSION }}。所有训练数据保存在本机，完全离线可用；
             AI 咨询需联网调用所选 AI 服务商（DeepSeek / 小米 Token Plan）接口。
@@ -319,6 +324,10 @@
     <!-- 训练周期编辑面板（自带 BackLayer 接管返回键） -->
     <CycleEditorSheet v-if="cycleEditorOpen" @close="cycleEditorOpen = false" />
 
+    <!-- 重看配置引导（自挂全屏浮层，不动 App.vue 的首启状态机） -->
+    <OnboardingWizard v-if="reenterOpen" mode="reenter"
+                      @finish="reenterOpen = false; syncEdits(); syncDefaults()" />
+
     <!-- 选动作面板纳入返回键 -->
     <BackLayer :show="!!picker" @back="picker = null" />
   </div>
@@ -339,6 +348,7 @@ import { initDatabase, run, todayStr } from '../database'
 import AppIcon from '../components/AppIcon.vue'
 import ExercisePickerSheet from '../components/ExercisePickerSheet.vue'
 import CycleEditorSheet from '../components/CycleEditorSheet.vue'
+import OnboardingWizard from '../components/OnboardingWizard.vue'
 import BackLayer from '../components/BackLayer.vue'
 import { APP_VERSION } from '../version'
 
@@ -440,6 +450,7 @@ const todayCycleIndex = computed(() =>
   getCycleIndex(new Date(), training.effectiveOffsetFor(todayStr()), training.scheduleCycle)
 )
 const cycleEditorOpen = ref(false)
+const reenterOpen = ref(false)
 
 // 槽位级配置编辑态（组数/次数），懒创建
 const edits = reactive({})

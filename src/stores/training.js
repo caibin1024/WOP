@@ -978,6 +978,7 @@ export const useTrainingStore = defineStore('training', () => {
     todayDayType,
     scheduleOffset,
     scheduleLoaded,
+    scheduleChanges,
     postponeStartDate,
     postponeInsertDate,
     effectiveOffsetFor,

@@ -1,9 +1,15 @@
 <template>
   <div class="app-shell">
     <main class="page-container">
-      <router-view />
+      <router-view v-if="wizardPhase === 'done'" />
+      <!-- 首启检测中：引导不是启动链路的单点，DB 异常也会放行到主界面 -->
+      <div v-else-if="wizardPhase === 'checking'" class="empty-state">
+        <AppIcon name="dumbbell" :size="28" style="color: var(--text-tertiary)" />
+        <p style="margin-top:12px">启动中…</p>
+      </div>
     </main>
-    <nav class="bottom-nav">
+    <!-- 引导期间 router-view 都没挂载，导航无意义 -->
+    <nav v-if="wizardPhase === 'done'" class="bottom-nav">
       <!-- replace：模块间切换不产生返回层级 -->
       <router-link to="/today" replace class="nav-item" active-class="active">
         <AppIcon name="dumbbell" :size="22" />
@@ -27,6 +33,9 @@
       </router-link>
     </nav>
 
+    <!-- 首启配置引导（全屏覆盖；重进走设置页自挂，不经过这里） -->
+    <OnboardingWizard v-if="wizardPhase === 'show'" mode="firstRun" @finish="wizardPhase = 'done'" />
+
     <!-- 顶层 Tab 按返回键的「再按一次退出」提示 -->
     <Transition name="exit-fade">
       <div v-if="exitHint" class="exit-hint">再按一次退出</div>
@@ -40,7 +49,9 @@ import { useRouter } from 'vue-router'
 import { Capacitor } from '@capacitor/core'
 import { App as AppPlugin } from '@capacitor/app'
 import AppIcon from './components/AppIcon.vue'
+import OnboardingWizard from './components/OnboardingWizard.vue'
 import { useBackStack } from './composables/useBackStack'
+import { query } from './database'
 
 const router = useRouter()
 const backStack = useBackStack()
@@ -55,6 +66,23 @@ const SECONDARY_PARENT = {
 
 // 顶层 Tab「再按一次退出」提示
 const exitHint = ref(false)
+
+// 首启引导三态：checking=检测中 / show=弹引导 / done=进主界面（done 后不可逆，重进走设置页自挂）
+const wizardPhase = ref('checking')
+
+/**
+ * 首启检测：query() 内部自会 initDatabase()，migration_onboard_v1 迁移先跑完再读键。
+ * DB 异常不卡死在启动：放行到主界面，引导不是启动链路的单点
+ */
+async function checkOnboarded() {
+  try {
+    const rows = await query("SELECT value FROM app_meta WHERE key = 'onboarded'")
+    wizardPhase.value = rows.length && rows[0].value === '1' ? 'done' : 'show'
+  } catch (e) {
+    console.error('首启检测失败', e)
+    wizardPhase.value = 'done'
+  }
+}
 let lastBackTime = 0
 let hintTimer = null
 let backListener = null
@@ -85,6 +113,7 @@ async function handleBack() {
 }
 
 onMounted(async () => {
+  checkOnboarded() // fire-and-forget：不阻塞返回键注册
   if (Capacitor.isNativePlatform()) {
     try {
       backListener = await AppPlugin.addListener('backButton', handleBack)

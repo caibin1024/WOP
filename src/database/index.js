@@ -149,7 +149,13 @@ async function initWebSqlite() {
   // 会直接抛 "element is not present in the DOM" → initDatabase 建表/播种全不执行，
   // 页面表现为"数据全空且刷新无效"（2026-09-30 真实踩坑）。组件 render() 为空，插了也看不见。
   if (!document.querySelector('jeep-sqlite')) {
-    document.body.appendChild(document.createElement('jeep-sqlite'))
+    const el = document.createElement('jeep-sqlite')
+    // autosave 必须开：jeep-sqlite 默认 autoSave=false——写入只进内存 sql.js，
+    // IndexedDB 里永远只有 open() 时写入的空库骨架（setInitialDBToStore），
+    // 表现是【刷新 = 恢复出厂】（2026-10-15 踩坑：引导页完成、刷新后又弹，实为全库清零重迁移）。
+    // 开启后 run/execute 收尾自动整库回写；事务提交路径不归它管，见 withTransaction。
+    el.setAttribute('autosave', 'true')
+    document.body.appendChild(el)
   }
   await sqlite.initWebStore()
 }
@@ -287,6 +293,28 @@ export async function initDatabase() {
         await db.run("INSERT INTO app_meta (key, value) VALUES ('migration_plan_boost_v1', '1')", [])
       }
 
+      // 迁移：首次启动引导标记（v1.4.0）——app_meta.onboarded：'1'=已引导（完成或跳过过），'0'=待引导。
+      // migration_onboard_v1 保证本段只跑一次（迁移铁律第 1 条）。
+      // 这里用"有无用户数据"判老用户，是【一次性】升级身份判定：只在标记键缺失时跑一次，
+      // 写完标记后永不重跑——用户之后删光数据也不会把向导再弹回来。
+      // 与铁律禁止的"每次启动用存在性判断要不要补种子数据"（用户删了会被补回）语义不同，
+      // 那是【持续性】自愈判定，这是【一次性】升级判定，别互相套用。
+      // 三张表任一有行 = 老用户：training_logs（练过）/ body_records（称过）/ aerobic_logs（打过有氧）。
+      // 不能查 workout_day_exercises / profile_* / exercise_defaults——首装就被种子写入，
+      // 查了会让纯新装也判成老用户，向导永远不弹。
+      const onboardMigrated = await db.query("SELECT value FROM app_meta WHERE key = 'migration_onboard_v1'", [])
+      if (!(onboardMigrated.values || []).length) {
+        const n = await db.query(
+          `SELECT (SELECT COUNT(*) FROM training_logs)
+                + (SELECT COUNT(*) FROM body_records)
+                + (SELECT COUNT(*) FROM aerobic_logs) AS n`,
+          []
+        )
+        const hasUserData = (n.values?.[0]?.n || 0) > 0
+        await db.run("INSERT INTO app_meta (key, value) VALUES ('onboarded', ?)", [hasUserData ? '1' : '0'])
+        await db.run("INSERT INTO app_meta (key, value) VALUES ('migration_onboard_v1', '1')", [])
+      }
+
       // 默认计划偏移：练三休一顺延 1 天（今天 8/11 为休息日，明天恢复 Push）。
       // 注意：此处必须用本地 db 对象，不能调模块级 run()（会重入 initDatabase）。
       await db.run(
@@ -361,6 +389,13 @@ export async function withTransaction(fn) {
   try {
     const result = await fn()
     await db.commitTransaction()
+    // 事务期间 jeep-sqlite 因 isTransactionActive 跳过 autosave，而 commitTransaction()
+    // 本身也不回写 store——提交后必须显式落一次盘，否则 web 端刷新丢掉事务内整批写入。
+    // 落盘失败只警告不翻案：事务已提交（内存里数据是好的），把成功改成抛错更糟。
+    if (!isNative) {
+      try { await sqlite.saveToStore(DB_NAME) }
+      catch (e) { console.warn('事务提交后落盘失败，刷新将丢失本批写入', e) }
+    }
     return result
   } catch (e) {
     // 回滚本身失败不掩盖原始错误（原始错误信息对用户更有价值）
