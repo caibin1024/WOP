@@ -143,12 +143,12 @@
         </div>
       </div>
 
-      <!-- AI 咨询 -->
+      <!-- 训练分析（AI 咨询，2026-11-10 更名） -->
       <div class="setting-group">
         <button class="setting-row" @click="toggleGroup('ai')" aria-expanded="openGroups.ai">
           <AppIcon name="sparkles" :size="20" class="row-icon accent" />
           <div class="row-text">
-            <span class="row-title">AI 咨询</span>
+            <span class="row-title">训练分析</span>
             <span class="row-sub">{{ ai.hasApiKey ? `${ai.providerLabel} Key 已配置` : '未配置 API Key' }}</span>
           </div>
           <AppIcon name="chevron-down" :size="18" class="row-chevron" :class="{ open: openGroups.ai }" />
@@ -304,7 +304,7 @@
           <p class="settings-note">三步引导可随时重看；已填的值会预填当前值，只有点「下一步」才写库。</p>
           <p class="settings-note">
             当前版本 WOP v{{ APP_VERSION }}。所有训练数据保存在本机，完全离线可用；
-            AI 咨询需联网调用所选 AI 服务商（DeepSeek / 小米 Token Plan）接口。
+            训练分析需联网调用所选 AI 服务商（DeepSeek / 小米 Token Plan）接口。
           </p>
         </div>
       </div>
@@ -737,12 +737,12 @@ async function doSaveProfile() {
   }
 }
 
-// 返回上一页（若无历史则回今日页）
+// 返回上一页（若无历史则回个人页——设置主要从个人页齿轮进入）
 function goBack() {
   if (window.history.length > 1) {
     router.back()
   } else {
-    router.replace('/today')
+    router.replace('/body')
   }
 }
 

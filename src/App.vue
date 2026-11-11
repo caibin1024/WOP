@@ -13,7 +13,15 @@
       <!-- replace：模块间切换不产生返回层级 -->
       <router-link to="/today" replace class="nav-item" active-class="active">
         <AppIcon name="dumbbell" :size="22" />
-        <span class="nav-label">今日</span>
+        <span class="nav-label">力量</span>
+      </router-link>
+      <router-link to="/aerobic" replace class="nav-item" active-class="active">
+        <AppIcon name="heart" :size="22" />
+        <span class="nav-label">有氧</span>
+      </router-link>
+      <router-link to="/ai" replace class="nav-item" active-class="active">
+        <AppIcon name="sparkles" :size="22" />
+        <span class="nav-label">训练分析</span>
       </router-link>
       <router-link to="/history" replace class="nav-item" active-class="active">
         <AppIcon name="chart" :size="22" />
@@ -22,10 +30,6 @@
       <router-link to="/exercises" replace class="nav-item" active-class="active">
         <AppIcon name="book" :size="22" />
         <span class="nav-label">动作库</span>
-      </router-link>
-      <router-link to="/aerobic" replace class="nav-item" active-class="active">
-        <AppIcon name="heart" :size="22" />
-        <span class="nav-label">有氧</span>
       </router-link>
       <router-link to="/body" replace class="nav-item" active-class="active">
         <AppIcon name="scale" :size="22" />
@@ -56,12 +60,12 @@ import { query } from './database'
 const router = useRouter()
 const backStack = useBackStack()
 
-// 二级页（模块内下钻）按返回键的路由返回；无可退历史时兜底到父级 Tab
+// 二级页（模块内下钻）按返回键的路由返回；无可退历史时兜底到父级 Tab。
+// /ai（训练分析）已提为一级 Tab，不在此表——返回键走「再按一次退出」
 const SECONDARY_PARENT = {
   'history-detail': '/history',
   'exercise-detail': '/exercises',
-  'settings': '/today',
-  'ai': '/history'
+  'settings': '/body' // 设置主要从个人页齿轮进入，无历史时兜底回个人页
 }
 
 // 顶层 Tab「再按一次退出」提示
@@ -164,7 +168,9 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 6px 12px;
+  /* 6 项等分排布：padding 收窄 + flex:1，给「训练分析」4 字标签留宽（原 5 项 12px padding 会挤） */
+  flex: 1;
+  padding: 6px 4px;
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 11px;
@@ -187,6 +193,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.2px;
+  white-space: nowrap; /* 「训练分析」4 字折行会破坏 44px 触控高度节律 */
 }
 
 .exit-hint {

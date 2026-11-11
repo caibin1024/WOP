@@ -3,7 +3,7 @@
     <!-- 头部（sticky 冻结，右侧显示今日进度 x/x） -->
     <div class="page-header today-head">
       <div>
-        <h1>今日训练</h1>
+        <h1>力量训练</h1>
         <div class="subtitle">{{ dayLabel }} · {{ dayDescription }}</div>
       </div>
       <div v-if="showProgress" class="head-progress num">{{ progress.done }} / {{ progress.total }}</div>

@@ -34,6 +34,7 @@
           <div class="cal-top">
             <span class="cal-num">{{ cell.day }}</span>
             <span v-if="cell.statusDot" class="cal-dot" :class="cell.statusDot"></span>
+            <span v-if="cell.hasAerobic" class="cal-dot aero"></span>
           </div>
           <span class="cal-type">{{ cell.dayTypeShort }}</span>
         </template>
@@ -44,6 +45,7 @@
     <div class="cal-legend">
       <span class="legend-item"><span class="cal-dot ok"></span>已完成</span>
       <span class="legend-item"><span class="cal-dot miss"></span>漏练</span>
+      <span class="legend-item"><span class="cal-dot aero"></span>有氧</span>
       <span class="legend-item legend-today">■ 今天</span>
     </div>
   </div>
@@ -126,6 +128,12 @@ import AppIcon from './AppIcon.vue'
 import BackLayer from './BackLayer.vue'
 
 const emit = defineEmits(['select-date'])
+// 有氧日期标记（HistoryView 传入预计算 Set）。.has() 只在 cells computed 里执行，
+// 模板只读布尔——本组件网格与长按弹窗是同一个 render，模板抛错会整块日历消失，
+// 所以模板侧保持零表达式、不碰弹窗模板
+const props = defineProps({
+  aerobicDates: { type: Set, default: () => new Set() }
+})
 const training = useTrainingStore()
 
 const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日']
@@ -170,6 +178,7 @@ const cells = computed(() => {
       dayType,
       dayTypeShort: TYPE_SHORT[dayType] || dayType,
       statusDot,
+      hasAerobic: props.aerobicDates.has(dateStr),
       isToday,
       longPressable: true
     })
@@ -427,6 +436,8 @@ onBeforeUnmount(clearPress)
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+  /* 吸收富余空间，把状态点（漏练+有氧可同格两个）挤到右侧并排 */
+  margin-right: auto;
 }
 .cal-dot {
   width: 7px;
@@ -441,6 +452,10 @@ onBeforeUnmount(clearPress)
 }
 .cal-dot.miss {
   background: var(--warning);
+}
+/* 有氧：天蓝，避开绿(已完成)/橙(漏练)两个语义标记色；与类型底色(拉=蓝,14% 透明)可区分 */
+.cal-dot.aero {
+  background: #38bdf8;
 }
 .cal-type {
   font-size: 11px;

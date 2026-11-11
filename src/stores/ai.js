@@ -28,6 +28,8 @@ import {
  *   具体数字永远实时准确，不依赖 AI"记住"
  * - 个人资料：每次动态注入（buildInitialContext），改身高/目标立即生效
  * - 增量数据：ai_uploaded=0 的新训练/身体/有氧记录，每次咨询前增量上传
+ * - 连续对话（v1.5.0）：回复弹窗内追问（askFollowUp → sendRequest({continueRecord})），
+ *   不新建咨询记录、Q/A 追加进 thread 列（question/reply 永远是第 1 轮），仅最新一条记录可追问
  */
 export const useAiStore = defineStore('ai', () => {
   const provider = ref('deepseek') // 当前供应商 id，缺省 deepseek
@@ -101,6 +103,7 @@ export const useAiStore = defineStore('ai', () => {
       title: r.title,
       question: r.question,
       reply: r.reply,
+      thread: parseThread(r.thread),
       createdAt: r.created_at
     }))
   }
@@ -113,7 +116,26 @@ export const useAiStore = defineStore('ai', () => {
       'INSERT INTO ai_consult_records (id, kind, title, question, reply, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       [id, kind, title, question, reply, createdAt]
     )
-    return { id, kind, title, question, reply, createdAt }
+    return { id, kind, title, question, reply, thread: [], createdAt }
+  }
+
+  /** thread 列是 JSON 数组（第 2 轮起的追问 [{role,content}...]）；缺列/坏 JSON 一律当空，
+   *  不能让一条脏数据炸掉整个列表加载 */
+  function parseThread(v) {
+    if (!v) return []
+    try {
+      const arr = JSON.parse(v)
+      return Array.isArray(arr) ? arr : []
+    } catch { return [] }
+  }
+
+  /** 追问落库：把新轮次追加进记录的 thread 并 UPDATE。
+   *  就地改 rec.thread（records 数组内的响应式对象），视图与 store 天然同步。
+   *  列表维度零变化——不 insertRecord、不 unshift，标题/时间仍是第 1 轮的 */
+  async function appendThread(rec, turns) {
+    const thread = [...(rec.thread || []), ...turns]
+    await run('UPDATE ai_consult_records SET thread = ? WHERE id = ?', [JSON.stringify(thread), rec.id])
+    rec.thread = thread
   }
 
   /** 记录标题：预设 → 预设标签；提问 → 去空白 + 截断 */
@@ -169,7 +191,7 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   function requireKey() {
-    if (!hasApiKey.value) throw new Error('未配置 API Key，请到「设置 → AI 咨询」填写')
+    if (!hasApiKey.value) throw new Error('未配置 API Key，请到「设置 → 训练分析」填写')
   }
 
   /**
@@ -251,11 +273,12 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   /**
-   * 统一发送请求（聊天 ask 与三条预设共用）：
+   * 统一发送请求（聊天 ask、三条预设、追问共用）：
    * 维护长期记忆 → 增量数据 → 组装 [system(含记忆) + 个人资料 + 数据概览(含今日计划) + 滚动窗口 + 数据 + 提问]
    * → 所选供应商 → 成功落库（数据/提问/回复）并标记 ai_uploaded=1；失败不落库不标记。
+   * continueRecord 有值 = 追问：不新建咨询记录，本轮 Q/A 追加进该记录的 thread（列表仍是一条）。
    */
-  async function sendRequest({ userContent, kind }) {
+  async function sendRequest({ userContent, kind, continueRecord = null }) {
     requireKey()
     if (isLoading.value) return
     if (!hasConversation.value) await createConversation()
@@ -284,6 +307,24 @@ export const useAiStore = defineStore('ai', () => {
         apiMessages.push({ role: m.role, content: m.content })
       }
       if (hasData) apiMessages.push({ role: 'user', content: dataUpdate.content })
+      // 追问续聊：把本条咨询此前轮次补进上下文。滚动窗口只有 MEMORY_WINDOW_SIZE 条
+      // 且 data 消息也占名额，长线程早期轮次会被折叠进长期记忆、细节丢失，
+      // 而 thread 里存着完整对话。只补不在当前窗口里的轮次（content 精确比对），
+      // 避免与窗口消息重复、让 AI 误以为用户把同一句话说了两遍。
+      if (continueRecord) {
+        const inWindow = new Set([...messages.value].map(m => m.content))
+        const turns = [
+          { role: 'user', content: continueRecord.question },
+          { role: 'assistant', content: continueRecord.reply },
+          ...(continueRecord.thread || [])
+        ].filter(t => t.content && !inWindow.has(t.content))
+        if (turns.length) {
+          apiMessages.push({
+            role: 'user',
+            content: `【本条咨询的此前对话】\n${turns.map(t => `[${t.role === 'user' ? '用户' : 'AI'}] ${t.content}`).join('\n\n')}`
+          })
+        }
+      }
       apiMessages.push({ role: 'user', content: userContent })
 
       const reply = await callAI({ provider: provider.value, apiKey: apiKey.value, messages: apiMessages })
@@ -301,14 +342,21 @@ export const useAiStore = defineStore('ai', () => {
         if (dataUpdate.aerobicIds.length) await markUploaded('aerobic_logs', dataUpdate.aerobicIds)
       }
 
-      // 6. 写入咨询记录（独立于会话消息，列表展示用；记忆折叠不丢历史）
-      const rec = await insertRecord({
-        kind,
-        title: makeRecordTitle(kind, userContent),
-        question: userContent,
-        reply
-      })
-      records.value.unshift(rec)
+      // 6. 落库：追问只追加 thread（列表仍是一条记录，标题/时间不变）；新咨询才建记录
+      if (continueRecord) {
+        await appendThread(continueRecord, [
+          { role: 'user', content: userContent },
+          { role: 'assistant', content: reply }
+        ])
+      } else {
+        const rec = await insertRecord({
+          kind,
+          title: makeRecordTitle(kind, userContent),
+          question: userContent,
+          reply
+        })
+        records.value.unshift(rec)
+      }
 
       messages.value.push(...added)
       return reply
@@ -335,6 +383,17 @@ export const useAiStore = defineStore('ai', () => {
     const q = String(question || '').trim()
     if (!q) return
     return sendRequest({ userContent: q, kind: 'ask' })
+  }
+
+  /** 追问（连续对话）：不生成新记录，问答追加进原记录 thread；
+   *  会话上下文照常走滚动窗口（kind='ask'），AI 视角与普通提问无异。
+   *  仅最新一条记录可追问由视图层把关，这里只兜底记录存在性 */
+  async function askFollowUp(recordId, content) {
+    const c = String(content || '').trim()
+    if (!c) return
+    const rec = records.value.find(r => r.id === recordId)
+    if (!rec) throw new Error('记录不存在或已被清空，请重新打开')
+    return sendRequest({ userContent: c, kind: 'ask', continueRecord: rec })
   }
 
   /** 预设①：综合分析 */
@@ -367,6 +426,7 @@ export const useAiStore = defineStore('ai', () => {
     setProvider,
     createConversation,
     ask,
+    askFollowUp,
     analyzeComprehensive,
     todayAdvice,
     todaySummary

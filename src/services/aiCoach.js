@@ -31,7 +31,7 @@ export const AI_PROVIDERS = {
   mimo: {
     label: '小米 Token Plan',
     url: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
-    model: 'mimo-v2.6-flash', // 用户拍板写死，设置页不展示、不可改
+    model: 'mimo-v2.6-pro', // 用户拍板写死，设置页不展示、不可改（v1.4.x 起换 pro：AI 教练属思考类，pro 更合适）
     webPath: '/mimo/chat/completions',
     keyHint: 'tp-...'
   }

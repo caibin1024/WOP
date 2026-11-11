@@ -1,7 +1,7 @@
 # CLAUDE.md — WOP 健身 App 项目须知
 
 > 供 AI 助手（及新接手的人）快速上手。改代码前请先读完「已知坑与地雷」一节。
-> 最后更新：2026-10-15（v1.4.0：首次启动配置引导 + web 端 jeep-sqlite 持久化修复；2026-10-13 v1.3.0：自增动作库 + 可配置训练周期 + 训练日志补录；2026-09-30 含 v1.2.0 未发版修复：web 端 jeep-sqlite 初始化）
+> 最后更新：2026-11-11（v1.6.0：布局重构——六项底部导航 力量/有氧/训练分析/记录/动作库/个人、有氧记录并入记录页时间线、「AI 咨询」UI 更名「训练分析」（路由/表名不变）；2026-11-10 v1.5.0：AI 咨询连续对话（回复弹窗内追问，`thread` 列）；2026-10-15 v1.4.0：首次启动配置引导 + web 端 jeep-sqlite 持久化修复；2026-10-13 v1.3.0：自增动作库 + 可配置训练周期 + 训练日志补录；2026-09-30 含 v1.2.0 未发版修复：web 端 jeep-sqlite 初始化）
 
 ## 项目是什么
 
@@ -63,6 +63,7 @@ cp android/app/build/outputs/apk/debug/app-debug.apk WOP-v<版本号>.apk
 | `android/app/build.gradle` | `versionCode`（**每次 +1**）、`versionName` |
 
 - 补丁号 +1 为常规发布；大功能/里程碑升 `0.x.0` 或 `x.0.0`
+- **大改动要单独占一个版本号，别收进已有的旧版本号"同车"**——即使上一个版本号还没提交/没发版（用户 2026-11-11 明确纠正过：v1.5.0 未发版，但布局重构是大改动，仍再升 v1.6.0）
 - APK 文件名约定 `WOP-v{APP_VERSION}.apk`
 - **versionCode 只能增不能减**：Android 不允许降级安装，想退回旧版必须卸载重装 → 本机数据全丢
 
@@ -99,7 +100,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 | `exercise_defaults` | 每个动作的默认重量/次数/秒数/组数 |
 | `app_meta` | 键值表：计划偏移（`schedule_offset_days` 基线）、顺延时间线（`schedule_changes`）、顺延撤销快照栈（`schedule_changes_undo`）、**训练周期（`schedule_cycle`，JSON 数组，v1.3.0——与 `ai_provider` 同为"读默认值"语义：读不到/`isValidScheduleCycle` 不过就当默认 4 槽，零迁移）**、漏练起始日、个人资料、**首启引导标记（`onboarded`，v1.4.0：'1'=已引导，读不到/非 '1' 就弹引导——设备本地身份，不进导出/导入，清库也不清它）**、AI 供应商选择（`ai_provider`）、两把 AI Key（`deepseek_api_key` / `mimo_api_key`）、AI 长期记忆、迁移标记。**AI 这三键是"读默认值"语义（读不到 `ai_provider` 就当 deepseek），无迁移** |
 | `ai_messages` | AI 会话滚动窗口 |
-| `ai_consult_records` | AI 咨询记录列表（独立于会话，折叠记忆时不丢） |
+| `ai_consult_records` | AI 咨询记录列表（独立于会话，折叠记忆时不丢）。`thread` 列（v1.5.0）存 JSON 数组——第 2 轮起的追问 `[{role,content}...]`，`question`/`reply` 两列永远是第 1 轮（列表/标题语义零改动）；加列走 PRAGMA 幂等双路径 |
 
 ### 迁移铁律
 
@@ -112,6 +113,8 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 4. 建表/迁移内部必须用**本地 `db` 对象**（`db.run(...)`），不能调模块级 `run()`——会重入 `initDatabase`。
 
 ## AI 教练模块（三层记忆，v1.1.0 起）
+
+**UI/导航名是「训练分析」**（2026-11-10 由「AI 咨询」更名，底部导航第 3 项）；`ai_consult_records` 表名、`ai` 路由名/path、store 名都不变，无迁移。改 UI 文案时认准新名，别把旧名写回去。
 
 解决"长会话丢失早期上下文"的问题，替代了旧的递归摘要方案：
 
@@ -128,6 +131,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 - **记忆折叠失败不能阻断咨询**：`maintainMemory()` 在 `sendRequest` 里被 try/catch 包住，静默跳过
 - 记忆维护用独立的 `MEMORY_SYSTEM_PROMPT`（不是教练角色），且 `maxTokens` 要够大（2000 中文字符 ≈ 4000 token）
 - **`SYSTEM_PROMPT` 是模块级静态常量（v1.3.0），带不了动态配置**：那段周期描述必须保持**周期中立**（"以【训练周期】为准"），真实周期序列由 `buildInitialContext`（建会话，需先 `try { await training.init() }`）与 `buildDataOverview`（每次问答）现算注入。改周期相关文案只动这两处 + 中立表述，别往 SYSTEM_PROMPT 里写具体序列
+- **连续对话（v1.5.0）**：回复弹窗内追问走 `askFollowUp` → `sendRequest({continueRecord})`——**管线只此一份**，别复制分叉。不新建咨询记录，本轮 Q/A 追加进 `thread` 列；追问消息 kind='ask' 计入滚动窗口，AI 视角与普通提问无异。追问时把本条咨询**已滚出窗口的早期轮次**按 content 精确比对去重后以「【本条咨询的此前对话】」块注入上下文（窗口只有 30 条且 data 消息占名额，长线程早期轮次会被折叠进长期记忆、细节丢失，而 thread 里存着完整对话）。「仅最新一条记录可追问」由视图层 `canFollowUp`（= `records[0]`）把关，store 只兜底记录存在性；清库/新建会话连带清 thread（DELETE 整行，无需单独清列）。预设记录第 1 轮 question 的**展示**用「一键咨询·X」短标签——**只改展示不改存储**，`question` 列仍是指令原文（追问注入 AI 上下文要用），别把标签写进库里
 
 ### 供应商切换（v1.2.0 起，双供应商）
 
@@ -184,7 +188,7 @@ android/        Capacitor Android 工程（MainActivity.java 之外基本不用�
 
 ### 前端 / Vue
 
-- **模板里只能引用 store 已经 `return` 出去的属性**。引用未导出的属性构建期不报错（生产模式静默返回 `undefined`），但一旦取它的子属性（`.length` 之类）就会在渲染时抛错；**而 `CalendarCard.vue` 的日历网格和底部弹窗属于同一个组件、同一个 render 函数 —— 弹窗模板抛错，整块日历卡片一起消失**（历史上真发生过：长按日历后整个日历组件不见了，只剩训练记录）。改 store 的导出面时务必同步检查模板；往这个弹窗里加东西要格外保守（只引用已导出属性、别写复杂表达式）。
+- **模板里只能引用 store 已经 `return` 出去的属性**。引用未导出的属性构建期不报错（生产模式静默返回 `undefined`），但一旦取它的子属性（`.length` 之类）就会在渲染时抛错；**而 `CalendarCard.vue` 的日历网格和底部弹窗属于同一个组件、同一个 render 函数 —— 弹窗模板抛错，整块日历卡片一起消失**（历史上真发生过：长按日历后整个日历组件不见了，只剩训练记录）。改 store 的导出面时务必同步检查模板；往这个弹窗里加东西要格外保守（只引用已导出属性、别写复杂表达式）。同款雷在混排时间线也有：`HistoryView` 纯有氧日的 `historyByDate[date]` 是 `undefined`，模板必须走 `hasTraining()` / `dayChip()` 这类判空 helper，别直接取 `.length`。
 - **CSS 变量以 `src/styles/main.css` 为准，没有 `--bg`**（只有 `--bg-base` / `--bg-deep` / `--bg-elevated`）。`var(--bg)` 引用不存在的变量**不报错、静默按透明处理**——全屏浮层写了它就是透明底：首启模式底下恰好只有 body 看不出来，重进/叠加模式直接透穿背后的页面（v1.4.0 的 `OnboardingWizard` 真踩过：`mode="reenter"` 挂在设置页上整个透穿）。全屏层背景对齐 body：`--bg-base` + 同款 radial/linear 渐变。
 
 ### 工具链

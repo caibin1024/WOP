@@ -1,11 +1,8 @@
 <template>
   <div class="ai-page">
     <header class="page-header ai-header">
-      <button class="back-btn" @click="goBack" aria-label="返回">
-        <AppIcon class="back-icon" name="arrow-right" :size="20" />
-      </button>
       <div>
-        <h1 class="ai-title"><AppIcon name="sparkles" :size="20" /> AI 咨询</h1>
+        <h1 class="ai-title"><AppIcon name="sparkles" :size="20" /> 训练分析</h1>
         <div class="subtitle">带记忆的持续会话 · {{ ai.providerLabel }}</div>
       </div>
     </header>
@@ -15,7 +12,7 @@
       <div v-if="!ai.hasApiKey" class="ai-empty">
         <AppIcon name="sparkles" :size="40" style="color: var(--text-tertiary)" />
         <p class="ai-empty-title">尚未配置 {{ ai.providerLabel }} API Key</p>
-        <p class="ai-hint">请到「设置 → AI 咨询」填写你的 API Key，即可开始与 AI 教练对话。</p>
+        <p class="ai-hint">请到「设置 → 训练分析」填写你的 API Key，即可开始与 AI 教练对话。</p>
         <button class="btn btn-primary" @click="goSettings">
           去设置配置
           <AppIcon name="arrow-right" :size="18" />
@@ -93,7 +90,40 @@
             <AppIcon name="close" :size="16" />
           </button>
         </div>
-        <div class="reply-body" v-html="markdownHtml(activeRecord.reply)"></div>
+        <!-- 完整多轮对话：Q 轮文本块 + A 轮 Markdown（第 1 轮 question 也显示）。
+             预设记录的第 1 轮 question 只显示短标签（映射见 activeTurns），指令原文不给用户看 -->
+        <div class="reply-main">
+          <div ref="replyBodyEl" class="reply-body" :class="{ 'reply-body--with-composer': canFollowUp }">
+            <template v-for="(t, i) in activeTurns" :key="i">
+              <div v-if="t.role === 'user'" class="turn-user">{{ t.content }}</div>
+              <div v-else class="turn-ai" v-html="markdownHtml(t.content)"></div>
+            </template>
+          </div>
+          <!-- 思考中：正文区居中的动画层。不能放进 .reply-body——那是滚动容器，
+               绝对定位子元素会随内容滚走，必须在滚动容器外、定位容器内 -->
+          <div v-if="followingUp" class="reply-thinking">
+            <div class="thinking-spinner"></div>
+            <div class="thinking-text">AI 正在思考…</div>
+          </div>
+        </div>
+
+        <!-- 追问错误显示在弹窗内：页面级错误条在遮罩下面，弹窗里看不见 -->
+        <div v-if="followUpError" class="reply-error">{{ followUpError }}</div>
+
+        <!-- 追问输入区：仅最新一条记录可继续（canFollowUp），旧记录只读回看 -->
+        <div v-if="canFollowUp" class="reply-composer">
+          <textarea
+            v-model="followUpText"
+            class="ai-input"
+            rows="1"
+            placeholder="继续追问，如「那下周卧推该怎么加量？」"
+            :disabled="ai.isLoading"
+            @keydown.enter.exact.prevent="sendFollowUp"
+          ></textarea>
+          <button class="ai-send" :disabled="ai.isLoading || !followUpText.trim()" @click="sendFollowUp" aria-label="发送追问">
+            <AppIcon name="chevron-up" :size="20" />
+          </button>
+        </div>
       </div>
     </div>
 
@@ -114,11 +144,38 @@ const ai = useAiStore()
 
 const question = ref('')
 const errorMsg = ref('')
-const activeRecord = ref(null) // 当前弹出查看的记录
+// 弹窗记录按 id 回查而非存对象引用：ai.load() 重建数组、新建会话/清库后引用会变陈旧；
+// 回查使记录消失时 computed 变 null，弹窗与 BackLayer 自动收起（清库边界免费解决）
+const activeRecordId = ref(null)
+const activeRecord = computed(() => ai.records.find(r => r.id === activeRecordId.value) || null)
 const listEl = ref(null)
+const replyBodyEl = ref(null)
+const followUpText = ref('')
+const followUpError = ref('')
+// 追问在途标志：不复用全局 ai.isLoading——页面级请求在途时点开记录不应误显示"思考中"
+const followingUp = ref(false)
 
 // 有 Key 且非加载中即可使用（会话在首次使用时自动建立）
 const canUse = computed(() => ai.hasApiKey && !ai.isLoading)
+
+// 弹窗完整对话：第 1 轮 question/reply + thread 里的追问轮
+const activeTurns = computed(() => {
+  const r = activeRecord.value
+  if (!r) return []
+  const turns = []
+  if (r.question) {
+    // 预设记录的第 1 轮 question 是几百字的指令原文，展示短标签即可（用户反馈原文太吵）。
+    // 只改展示不改存储：question 列仍是指令原文——追问时要按 continueRecord.question 注入 AI 上下文
+    turns.push({ role: 'user', content: r.kind === 'preset' ? `一键咨询·${r.title}` : r.question })
+  }
+  turns.push({ role: 'assistant', content: r.reply })
+  return turns.concat(r.thread || [])
+})
+
+// 只有最新一条记录可追问：旧记录纯只读回看，不打断整体问答顺序
+const canFollowUp = computed(() =>
+  !!activeRecord.value && activeRecord.value.id === ai.records[0]?.id && ai.hasApiKey
+)
 
 function recordIcon(r) {
   if (r.kind === 'preset') {
@@ -145,16 +202,45 @@ function markdownHtml(content) {
 }
 
 function openReply(r) {
-  activeRecord.value = r
+  activeRecordId.value = r.id
+  followUpError.value = '' // 换记录清残留错误
+  followUpText.value = ''  // 草稿不跨记录携带，避免追问串记录
+  // 从第一轮按序读：打开滚到顶部
+  nextTick(() => { if (replyBodyEl.value) replyBodyEl.value.scrollTop = 0 })
 }
 function closeReply() {
-  activeRecord.value = null
+  activeRecordId.value = null
+  followUpError.value = ''
 }
 
 /** 新记录由 store 写入并 unshift 到 records[0]，成功后自动弹出展示回复 */
 function openLatestReply() {
-  const rec = ai.records[0]
-  if (rec) activeRecord.value = rec
+  if (ai.records[0]) activeRecordId.value = ai.records[0].id
+}
+
+/** 追问（连续对话）：不新建记录，本轮 Q/A 追加进当前弹窗记录的 thread */
+async function sendFollowUp() {
+  const q = followUpText.value.trim()
+  if (!q || !canFollowUp.value || ai.isLoading) return
+  followUpError.value = ''
+  followingUp.value = true
+  try {
+    await ai.askFollowUp(activeRecordId.value, q)
+    followUpText.value = ''
+    await nextTick()
+    // 定位：新一轮「我的提问」顶到可视区第一行，AI 回复接在下面。
+    // 滚到底部会落在长回复的末尾，还得手动回翻找提问起点（用户反馈）
+    const body = replyBodyEl.value
+    const qEls = body?.querySelectorAll('.turn-user')
+    const qEl = qEls?.[qEls.length - 1]
+    if (body && qEl) {
+      body.scrollTop = qEl.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop
+    }
+  } catch (e) {
+    followUpError.value = e?.message || String(e) // 失败不落库，输入保留可直接重试
+  } finally {
+    followingUp.value = false
+  }
 }
 
 async function send() {
@@ -187,19 +273,13 @@ function goSettings() {
   router.push('/settings')
 }
 
-function goBack() {
-  if (activeRecord.value) { closeReply(); return }
-  if (window.history.length > 1) router.back()
-  else router.replace('/history')
-}
-
 // 新记录 unshift 到顶部，滚回列表顶部
 watch(() => ai.records.length, async () => {
   await nextTick()
   if (listEl.value) listEl.value.scrollTop = 0
 })
 
-// 返回键由 App.vue 全局统一处理（先关浮层再返回）；顶部返回按钮走 goBack
+// 返回键由 App.vue 全局统一处理：先关回复弹窗（BackLayer），顶层 Tab 再按一次退出
 onMounted(() => {
   ai.load().catch(e => console.error('AI store 加载失败', e))
 })
@@ -269,28 +349,6 @@ function renderMarkdown(text) {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.back-btn {
-  background: none;
-  border: none;
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  cursor: pointer;
-  color: var(--text-primary);
-  flex-shrink: 0;
-  margin-left: -10px;
-  transition: color 0.2s, background 0.2s;
-}
-.back-btn:active {
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-.back-icon {
-  transform: rotate(180deg);
 }
 .ai-title {
   display: flex;
@@ -578,5 +636,81 @@ function renderMarkdown(text) {
 .reply-body :deep(strong) {
   color: var(--accent-strong);
   font-weight: 600;
+}
+/* 多轮对话：用户提问块，肉眼与 AI 的 Markdown 回复区分开 */
+.turn-user {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  margin: 12px 0 6px;
+  white-space: pre-wrap; /* Shift+Enter 的换行要原样显示 */
+}
+.turn-user:first-child {
+  margin-top: 0;
+}
+.turn-ai {
+  margin: 6px 0 2px;
+}
+/* 回复正文区外层：给思考动画层当定位容器（动画层盖住整个正文区，但不随内容滚动） */
+.reply-main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+}
+/* 思考中：正文区居中动画层，scrim 压暗旧内容、突出 spinner。
+   spinner 严格居中（用户要"屏幕中间的动画"）；说明文字绝对定位挂下方，
+   不参与居中——flex 把 spinner+文字当一组居中会让动画重心偏上 */
+.reply-thinking {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  z-index: 2;
+}
+.thinking-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: thinking-spin 0.8s linear infinite;
+}
+.thinking-text {
+  position: absolute;
+  top: calc(50% + 28px); /* spinner 半径 18 + 间距 10 */
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+@keyframes thinking-spin {
+  to { transform: rotate(360deg); }
+}
+/* 弹窗内错误条（仿 .ai-error） */
+.reply-error {
+  background: var(--danger-dim);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--danger);
+  padding: 10px 20px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+/* 追问输入区（照抄 .ai-composer，横向 padding 对齐弹窗 20px） */
+.reply-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 20px calc(12px + var(--safe-bottom-real, env(safe-area-inset-bottom)));
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+/* 有输入区时 safe-area 由 .reply-composer 承担，正文不再重复垫高 */
+.reply-body--with-composer {
+  padding-bottom: 16px;
 }
 </style>

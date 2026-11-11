@@ -9,13 +9,13 @@ const routes = [
     path: '/today',
     name: 'today',
     component: () => import('../views/TodayView.vue'),
-    meta: { title: '今日训练' }
+    meta: { title: '力量训练' }
   },
   {
     path: '/history',
     name: 'history',
     component: () => import('../views/HistoryView.vue'),
-    meta: { title: '训练记录' }
+    meta: { title: '记录' }
   },
   {
     path: '/history/:date',
@@ -57,7 +57,7 @@ const routes = [
     path: '/ai',
     name: 'ai',
     component: () => import('../views/AiConsultView.vue'),
-    meta: { title: 'AI 咨询' }
+    meta: { title: '训练分析' }
   }
 ]
 

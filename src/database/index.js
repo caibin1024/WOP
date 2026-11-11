@@ -129,12 +129,15 @@ CREATE TABLE IF NOT EXISTS ai_messages (
 CREATE INDEX IF NOT EXISTS idx_ai_messages_seq ON ai_messages(seq);
 
 -- AI 咨询记录（v0.3.1 记录列表）：每条咨询一条，独立于 ai_messages（自动摘要删会话消息不丢历史）
+-- thread 列（v1.5.0 连续对话）存 JSON 数组（第 2 轮起的追问 [{role,content}...]），
+-- question/reply 两列永远是第 1 轮，列表/标题语义零改动
 CREATE TABLE IF NOT EXISTS ai_consult_records (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL DEFAULT '',
   question TEXT DEFAULT '',
   reply TEXT NOT NULL DEFAULT '',
+  thread TEXT DEFAULT '',
   created_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_ai_consult_records_created ON ai_consult_records(created_at);
@@ -248,6 +251,14 @@ export async function initDatabase() {
         if (!(aiCols.values || []).some(c => c.name === 'ai_uploaded')) {
           await db.run(`ALTER TABLE ${table} ADD COLUMN ai_uploaded INTEGER NOT NULL DEFAULT 0`)
         }
+      }
+
+      // 迁移：AI 咨询记录加 thread 列（v1.5.0 连续对话）——JSON 数组存第 2 轮起的追问，
+      // question/reply 永远是第 1 轮（列表/标题语义零改动）。
+      // 用列存在性检查即可（幂等），纯加列无数据迁移，不需要 app_meta 标记键。
+      const recCols = await db.query('PRAGMA table_info(ai_consult_records)')
+      if (!(recCols.values || []).some(c => c.name === 'thread')) {
+        await db.run("ALTER TABLE ai_consult_records ADD COLUMN thread TEXT DEFAULT ''")
       }
 
       // 首次初始化：把预置计划写入 workout_day_exercises（表空才写入）。
